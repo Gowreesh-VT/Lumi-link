@@ -88,7 +88,7 @@ const Landing = () => {
   ];
 
   return (
-    <div className="min-h-screen -m-8 overflow-x-hidden">
+    <div className="min-h-screen overflow-x-hidden">
       {/* Hero Section */}
       <motion.section 
         className="relative min-h-screen flex items-center justify-center overflow-hidden"
@@ -384,7 +384,7 @@ const Landing = () => {
 
       {/* Footer */}
       <footer className="bg-gray-900 text-white py-12">
-        <div className="container mx-auto px-6">
+        <div className="container mx-auto px-6 md:px-8 lg:px-12">
           <div className="grid md:grid-cols-3 gap-8 mb-8">
             <div>
               <h3 className="text-xl font-bold mb-4">LumiLink</h3>
