@@ -74,7 +74,7 @@ const About = () => {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-muted-foreground leading-relaxed">
-            The <strong>Hybrid Li-Fi + Wi-Fi Communication System</strong> is an
+            The <strong>The LumiLink Communication System</strong> is an
             innovative academic engineering project that combines the advantages of
             Light Fidelity (Li-Fi) and traditional Wi-Fi technologies to create a
             robust, high-speed wireless communication network.
