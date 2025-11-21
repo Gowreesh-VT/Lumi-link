@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "gowreesh-portfolio"
+  },
+  "targets": {
+    "gowreesh-portfolio": {
+      "hosting": {
+        "lumi-link": [
+          "lumi-link"
+        ]
+      }
+    }
+  }
+}
