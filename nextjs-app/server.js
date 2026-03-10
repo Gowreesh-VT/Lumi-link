@@ -8,6 +8,12 @@ import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import { SerialPort } from 'serialport';
 import { ReadlineParser } from '@serialport/parser-readline';
+import {
+  addStoredMessage,
+  updateStoredMessageStatus,
+  updateHardwareStatus,
+  getHardwareStatus,
+} from './lib/serverState.js';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || 'localhost';
@@ -57,10 +63,14 @@ function openSerialPort(path, label) {
       console.error(`[serial] Failed to open ${label} (${path}):`, err.message);
     } else {
       console.log(`[serial] ${label} open: ${path} @ ${BAUD_RATE} baud`);
+      syncHardwareStatus();
     }
   });
 
-  sp.on('close', () => console.log(`[serial] ${label} closed`));
+  sp.on('close', () => {
+    console.log(`[serial] ${label} closed`);
+    syncHardwareStatus();
+  });
   sp.on('error', (err) => console.error(`[serial] ${label} error:`, err.message));
 
   return sp;
@@ -69,6 +79,17 @@ function openSerialPort(path, label) {
 const txPort = openSerialPort(TX_PORT_PATH, 'TX');
 const rxPort = openSerialPort(RX_PORT_PATH, 'RX');
 
+// Sync the shared singleton + broadcast to all clients
+function syncHardwareStatus() {
+  const patch = {
+    txConnected: !!txPort?.isOpen,
+    rxConnected: !!rxPort?.isOpen,
+    lifiConnected: !!(txPort?.isOpen && rxPort?.isOpen),
+  };
+  updateHardwareStatus(patch);
+  io.emit('system_status', getSocketStatus());
+}
+
 // Forward every newline-delimited line from the RX ESP32 → all browser clients
 if (rxPort) {
   const parser = rxPort.pipe(new ReadlineParser({ delimiter: '\n' }));
@@ -76,29 +97,31 @@ if (rxPort) {
     const text = line.trim();
     if (!text) return;
     console.log(`[RX] ${text}`);
+
+    // Store in shared state so GET /api/messages returns real data
+    addStoredMessage({ content: text, direction: 'received', status: 'success' });
+
     io.emit('received_message', { message: text, timestamp: new Date().toISOString() });
   });
 }
 
 // ─── Socket.io events ────────────────────────────────────────────────────────
 
-function getStatus() {
+function getSocketStatus() {
+  const hw = getHardwareStatus();
   return {
-    lifiConnected: !!(txPort?.isOpen && rxPort?.isOpen),
-    txConnected: !!txPort?.isOpen,
-    rxConnected: !!rxPort?.isOpen,
-    timestamp: new Date().toISOString(),
+    lifiConnected: hw.lifiConnected,
+    txConnected: hw.txConnected,
+    rxConnected: hw.rxConnected,
+    timestamp: hw.updatedAt,
   };
 }
-
-// Track paused state so we can skip TX writes when paused
-let transmissionActive = true;
 
 io.on('connection', (socket) => {
   console.log(`[socket] connected: ${socket.id}`);
 
   // Give the new client the current status immediately
-  socket.emit('system_status', getStatus());
+  socket.emit('system_status', getSocketStatus());
 
   // Browser wants to transmit a message via Li-Fi
   socket.on('send_message', ({ message }) => {
@@ -106,7 +129,7 @@ io.on('connection', (socket) => {
     const safe = message.replace(/[\r\n]+/g, ' ').trim();
     if (!safe) return;
 
-    if (!transmissionActive) {
+    if (!getHardwareStatus().transmissionActive) {
       console.warn('[TX] Transmission paused — message not sent');
       socket.emit('transmit_ack', { success: false, error: 'Transmission is paused' });
       return;
@@ -114,29 +137,35 @@ io.on('connection', (socket) => {
 
     console.log(`[TX] ${safe}`);
 
+    // Record in shared state (pending → updated to success/error on ack)
+    const stored = addStoredMessage({ content: safe, direction: 'sent', status: 'pending' });
+
     if (txPort?.isOpen) {
       txPort.write(`${safe}\n`, (err) => {
+        const status = err ? 'error' : 'success';
+        updateStoredMessageStatus(stored.id, status);
         socket.emit('transmit_ack', err
-          ? { success: false, error: err.message }
-          : { success: true });
+          ? { success: false, error: err.message, id: stored.id }
+          : { success: true, id: stored.id });
       });
     } else {
+      updateStoredMessageStatus(stored.id, 'error');
       console.warn('[TX] Port not open — message not sent to hardware');
-      socket.emit('transmit_ack', { success: false, error: 'TX serial port not connected' });
+      socket.emit('transmit_ack', { success: false, error: 'TX serial port not connected', id: stored.id });
     }
   });
 
   // Dashboard / transmitter page requests to start or stop transmission
   socket.on('start_transmission', () => {
-    transmissionActive = true;
+    updateHardwareStatus({ transmissionActive: true });
     console.log('[TX] Transmission started');
-    io.emit('system_status', getStatus());
+    io.emit('system_status', getSocketStatus());
   });
 
   socket.on('stop_transmission', () => {
-    transmissionActive = false;
+    updateHardwareStatus({ transmissionActive: false });
     console.log('[TX] Transmission stopped');
-    io.emit('system_status', getStatus());
+    io.emit('system_status', getSocketStatus());
   });
 
   socket.on('disconnect', () => {
@@ -145,12 +174,15 @@ io.on('connection', (socket) => {
 });
 
 // Broadcast status updates every 5 s
-setInterval(() => io.emit('system_status', getStatus()), 5000);
+setInterval(() => {
+  syncHardwareStatus();
+}, 5000);
 
 // ─── Start ──────────────────────────────────────────────────────────────────
 
 httpServer.listen(port, () => {
-  console.log(`\n> LumiLink running at http://${hostname}:${port}\n`);
+  console.log(`\n> LumiLink running at http://${hostname}:${port}`);
+  console.log(`> API routes: /api/health  /api/status  /api/messages  /api/settings\n`);
   if (!TX_PORT_PATH || !RX_PORT_PATH) {
     console.warn('  Serial ports not configured.');
     console.warn('  Run `npm run list-ports` to find them, then add TX_PORT and RX_PORT to .env\n');
