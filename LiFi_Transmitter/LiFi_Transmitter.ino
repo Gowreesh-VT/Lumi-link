@@ -1,62 +1,48 @@
-#define LED_PIN 4
-#define BIT_DURATION_US                                                        \
-  10000 // 10ms per bit. Using microseconds for higher precision in half-bits
+// -------- Li-Fi Transmitter (NRZ) --------
+// LED on GPIO 23. Reads messages from Serial (typed in Serial Monitor
+// OR sent by server.js) and transmits them bit-by-bit via the LED.
+
+const int ledPin = 23;    // GPIO 23 → 220Ω → LED → GND
+const int bitDelay = 200; // milliseconds per bit (must match receiver)
 
 void setup() {
   Serial.begin(115200);
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW); // Idle state is LOW
-
-  Serial.println("--- Li-Fi Manchester Transmitter Ready ---");
-  Serial.println("Type text in the Serial Monitor and press Enter to send.");
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, LOW);
+  Serial.println("--- Li-Fi NRZ Transmitter Ready ---");
+  Serial.println("Type a message and press Enter to send.");
 }
 
-void sendManchesterBit(int bit) {
-  // Manchester Encoding:
-  // '1' = LOW to HIGH transition in the middle of the bit
-  // '0' = HIGH to LOW transition in the middle of the bit
-
-  if (bit == 1) {
-    digitalWrite(LED_PIN, LOW);
-    delayMicroseconds(BIT_DURATION_US / 2);
-    digitalWrite(LED_PIN, HIGH);
-    delayMicroseconds(BIT_DURATION_US / 2);
-  } else {
-    digitalWrite(LED_PIN, HIGH);
-    delayMicroseconds(BIT_DURATION_US / 2);
-    digitalWrite(LED_PIN, LOW);
-    delayMicroseconds(BIT_DURATION_US / 2);
-  }
+void sendBit(int bitValue) {
+  digitalWrite(ledPin, bitValue == 1 ? HIGH : LOW);
+  delay(bitDelay);
 }
 
-void sendByte(char c) {
-  // 1. Start Bit
-  // We'll use a distinct sequence to wake up the receiver.
-  // A standard '0' transition is a good start pulse (HIGH then LOW).
-  sendManchesterBit(0);
-
-  // 2. Data Bits (8 bits, MSB first is standard for Manchester)
+void sendChar(char c) {
+  int ascii = int(c);
+  // Optional start bit so receiver can sync: LED LOW for 1 bit
+  sendBit(0);
+  // 8 data bits, MSB first
   for (int i = 7; i >= 0; i--) {
-    int bit = (c >> i) & 0x01;
-    sendManchesterBit(bit);
+    sendBit((ascii >> i) & 1);
   }
-
-  // 3. Stop Bit (Always LOW to return to idle)
-  digitalWrite(LED_PIN, LOW);
-  delayMicroseconds(BIT_DURATION_US * 2); // Idle time between bytes
+  // Stop bit: LED LOW
+  sendBit(0);
 }
 
 void loop() {
   if (Serial.available() > 0) {
-    String msg = Serial.readStringUntil('\n'); // Read user input
-    msg += '\n';                               // Add newline for the receiver
+    String msg = Serial.readStringUntil('\n');
+    msg += '\n';
 
     Serial.print("Sending: ");
     Serial.print(msg);
 
-    // Send the message character by character
-    for (int i = 0; i < msg.length(); i++) {
-      sendByte(msg[i]);
+    for (int i = 0; i < (int)msg.length(); i++) {
+      sendChar(msg[i]);
     }
+
+    // Idle: LED OFF between messages
+    digitalWrite(ledPin, LOW);
   }
 }

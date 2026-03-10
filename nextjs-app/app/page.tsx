@@ -8,11 +8,27 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+
+// Seeded pseudo-random so server and client produce identical values
+function seededRandom(seed: number) {
+  const x = Math.sin(seed + 1) * 10000;
+  return x - Math.floor(x);
+}
 
 export default function LandingPage() {
   const router = useRouter();
   const [, setScrollY] = useState(0);
+
+  const bubbles = useMemo(() =>
+    Array.from({ length: 20 }, (_, i) => ({
+      width: seededRandom(i * 4) * 100 + 50,
+      height: seededRandom(i * 4 + 1) * 100 + 50,
+      left: seededRandom(i * 4 + 2) * 100,
+      top: seededRandom(i * 4 + 3) * 100,
+      duration: seededRandom(i) * 5 + 5,
+    })),
+  []);
 
   useEffect(() => {
     const handleScroll = () => setScrollY(window.scrollY);
@@ -50,18 +66,18 @@ export default function LandingPage() {
         style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}
       >
         <div className="absolute inset-0 overflow-hidden">
-          {[...Array(20)].map((_, i) => (
+          {bubbles.map((b, i) => (
             <motion.div
               key={i}
               className="absolute rounded-full bg-white/10"
               style={{
-                width: Math.random() * 100 + 50,
-                height: Math.random() * 100 + 50,
-                left: `${Math.random() * 100}%`,
-                top: `${Math.random() * 100}%`,
+                width: b.width,
+                height: b.height,
+                left: `${b.left}%`,
+                top: `${b.top}%`,
               }}
               animate={{ y: [0, -30, 0], x: [0, 10, 0], scale: [1, 1.1, 1] }}
-              transition={{ duration: Math.random() * 5 + 5, repeat: Infinity, ease: 'easeInOut' }}
+              transition={{ duration: b.duration, repeat: Infinity, ease: 'easeInOut' }}
             />
           ))}
         </div>
