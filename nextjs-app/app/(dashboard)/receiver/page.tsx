@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Download, AlertCircle, Activity, Trash2 } from 'lucide-react';
+import { Download, AlertCircle, Activity, Trash2, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -16,6 +16,52 @@ import {
 // Regex to detect Manchester decode error tokens like [1A], [FF] etc.
 const HEX_ERROR_RE = /\[([0-9A-Fa-f]{1,2})\]/;
 
+// ── Typewriter component ──────────────────────────────────────────────────────
+function TypewriterText({ text, instant }: { text: string; instant?: boolean }) {
+  const [displayed, setDisplayed] = useState(instant ? text : '');
+  const idxRef = useRef(instant ? text.length : 0);
+
+  useEffect(() => {
+    if (instant) { setDisplayed(text); return; }
+    idxRef.current = 0;
+    setDisplayed('');
+    const id = setInterval(() => {
+      idxRef.current += 1;
+      setDisplayed(text.slice(0, idxRef.current));
+      if (idxRef.current >= text.length) clearInterval(id);
+    }, 35);
+    return () => clearInterval(id);
+  }, [text, instant]);
+
+  const done = displayed.length >= text.length;
+  return (
+    <span className="font-mono text-sm break-all">
+      {displayed}
+      {!done && <span className="animate-pulse text-primary">▌</span>}
+    </span>
+  );
+}
+
+interface FeedMessage {
+  id: string;
+  content: string;
+  timestamp: string;
+  instant: boolean;
+}
+
+interface ReceivedFile {
+  id: string;
+  name: string;
+  lines: string[];
+  binary: boolean; // true = base64-encoded binary
+  complete: boolean;
+  receivedAt: string;
+}
+
+const FILE_START_RE = /^__LIFI_FILE_START__:(.+)$/;
+const FILE_START_B64_RE = /^__LIFI_FILE_START_B64__:(.+)$/;
+const FILE_END = '__LIFI_FILE_END__';
+
 interface ErrorEntry {
   id: string;
   type: string;
@@ -24,6 +70,7 @@ interface ErrorEntry {
 }
 
 export default function ReceiverPage() {
+  const systemStatus = useStore((s) => s.systemStatus);
   const messages = useStore((s) => s.messages);
   const addMessage = useStore((s) => s.addMessage);
   const clearMessages = useStore((s) => s.clearMessages);
@@ -34,12 +81,42 @@ export default function ReceiverPage() {
   const [socketConnected, setSocketConnected] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll message list to bottom when new messages arrive
+  // Separate feed: historical (instant) vs live (typewriter)
+  const [feedMessages, setFeedMessages] = useState<FeedMessage[]>([]);
+
+  // Assembled files received over Li-Fi
+  const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
+  const incomingFileRef = useRef<{ id: string; name: string; lines: string[]; binary: boolean } | null>(null);
+
+  // Auto-scroll to bottom on new feed entries
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [feedMessages]);
+
+  // ── Fetch existing messages from the server on first load ─────────────────
+  useEffect(() => {
+    fetch('/api/messages?direction=received')
+      .then((r) => r.json())
+      .then(({ messages: existing }) => {
+        if (!Array.isArray(existing)) return;
+        existing.forEach((m: { id?: string; content: string; timestamp?: string; status: 'success' | 'error' | 'pending' }) => {
+          addMessage({ content: m.content, direction: 'received', status: m.status });
+          setFeedMessages((prev) => [
+            ...prev,
+            {
+              id: m.id ?? Math.random().toString(36).slice(2, 9),
+              content: m.content,
+              timestamp: m.timestamp ?? new Date().toISOString(),
+              instant: true,
+            },
+          ]);
+        });
+      })
+      .catch(() => {/* server may not be ready yet */});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Socket setup ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -59,7 +136,7 @@ export default function ReceiverPage() {
       // Detect hex-encoded Manchester decode errors from the ESP32
       if (HEX_ERROR_RE.test(text)) {
         setErrorLog((prev) => [
-          ...prev.slice(-49), // keep last 50 errors
+          ...prev.slice(-49),
           {
             id: Math.random().toString(36).slice(2, 9),
             type: 'Manchester Decode Error',
@@ -67,10 +144,49 @@ export default function ReceiverPage() {
             details: `Received invalid byte token: ${text}`,
           },
         ]);
-        // Still record in the main feed so nothing is hidden
       }
 
+      // ── File framing protocol ──────────────────────────────────────────
+      const startMatch = FILE_START_RE.exec(text);
+      const startB64Match = FILE_START_B64_RE.exec(text);
+      if (startMatch || startB64Match) {
+        incomingFileRef.current = {
+          id: Math.random().toString(36).slice(2, 9),
+          name: (startMatch ?? startB64Match)![1],
+          lines: [],
+          binary: !!startB64Match,
+        };
+        return;
+      }
+
+      if (text === FILE_END) {
+        if (incomingFileRef.current) {
+          const file = { ...incomingFileRef.current, complete: true, receivedAt: new Date().toISOString() };
+          setReceivedFiles((prev) => [...prev, file]);
+          incomingFileRef.current = null;
+        }
+        return;
+      }
+
+      if (incomingFileRef.current) {
+        incomingFileRef.current.lines.push(text);
+        // Don't show binary chunks in the feed
+        if (incomingFileRef.current.binary) return;
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       addMessage({ content: text, direction: 'received', status: 'success' });
+
+      // Add to live feed with typewriter animation
+      setFeedMessages((prev) => [
+        ...prev.slice(-99), // keep last 100
+        {
+          id: Math.random().toString(36).slice(2, 9),
+          content: text,
+          timestamp: data.timestamp ?? new Date().toISOString(),
+          instant: false,
+        },
+      ]);
 
       // Roll the signal chart forward on every real message
       setSignalData((prev) => {
@@ -135,7 +251,36 @@ export default function ReceiverPage() {
     exportToCSV(data, `lifi-received-${Date.now()}.csv`);
   };
 
-  const receivedMessages = messages.filter((m) => m.direction === 'received');
+  const handleClear = () => {
+    clearMessages();
+    setFeedMessages([]);
+  };
+
+  const MIME_MAP: Record<string, string> = {
+    mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg',
+    aac: 'audio/aac', flac: 'audio/flac', mp4: 'video/mp4',
+  };
+
+  const handleDownloadFile = (file: ReceivedFile) => {
+    let blob: Blob;
+    if (file.binary) {
+      const b64 = file.lines.join('');
+      const raw = atob(b64);
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+      const mime = MIME_MAP[ext] ?? 'application/octet-stream';
+      blob = new Blob([bytes], { type: mime });
+    } else {
+      blob = new Blob([file.lines.join('\n')], { type: 'text/plain' });
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   // ── UI ────────────────────────────────────────────────────────────────────
   return (
@@ -150,14 +295,22 @@ export default function ReceiverPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={handleExport} variant="outline" className="gap-2" disabled={receivedMessages.length === 0}>
+          <Button onClick={handleExport} variant="outline" className="gap-2" disabled={feedMessages.length === 0}>
             <Download className="h-4 w-4" /> Export CSV
           </Button>
-          <Button onClick={clearMessages} variant="ghost" size="icon" title="Clear all messages">
+          <Button onClick={handleClear} variant="ghost" size="icon" title="Clear all messages">
             <Trash2 className="h-4 w-4 text-muted-foreground" />
           </Button>
         </div>
       </div>
+
+      {/* RX port warning banner */}
+      {socketConnected && !systemStatus.rxConnected && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          RX serial port not open — close Arduino IDE&apos;s Serial Monitor, then the server will reconnect automatically.
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Live feed + signal chart */}
@@ -167,7 +320,7 @@ export default function ReceiverPage() {
               <CardTitle className="flex items-center gap-2">
                 <Activity className="h-5 w-5 text-primary" /> Live Data Feed
                 <span className="ml-auto text-xs font-normal text-muted-foreground">
-                  {receivedMessages.length} message{receivedMessages.length !== 1 ? 's' : ''} received
+                  {feedMessages.length} message{feedMessages.length !== 1 ? 's' : ''} received
                 </span>
               </CardTitle>
             </CardHeader>
@@ -175,7 +328,7 @@ export default function ReceiverPage() {
               <ScrollArea className="h-[360px] pr-4">
                 {/* scrollRef on the inner div to auto-scroll */}
                 <div ref={scrollRef} className="h-full overflow-auto">
-                  {receivedMessages.length === 0 ? (
+                  {feedMessages.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground pt-12">
                       <Activity className="h-8 w-8 opacity-40" />
                       <p className="text-sm">Waiting for incoming data...</p>
@@ -185,7 +338,7 @@ export default function ReceiverPage() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {receivedMessages.map((msg) => (
+                      {feedMessages.map((msg) => (
                         <motion.div
                           key={msg.id}
                           initial={{ opacity: 0, x: -20 }}
@@ -193,7 +346,7 @@ export default function ReceiverPage() {
                           className="p-3 rounded-lg bg-secondary/50 border border-border/50"
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <p className="font-mono text-sm break-all">{msg.content}</p>
+                            <TypewriterText text={msg.content} instant={msg.instant} />
                             <span className="text-xs text-success shrink-0 bg-success/10 px-2 py-0.5 rounded-full">RX</span>
                           </div>
                           <p className="text-xs text-muted-foreground mt-1">
@@ -227,7 +380,36 @@ export default function ReceiverPage() {
         </div>
 
         {/* Error log */}
-        <div>
+        <div className="space-y-6">
+          {/* Received files */}
+          {receivedFiles.length > 0 && (
+            <Card className="glass-card shadow-card border-primary/30">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <FileText className="h-4 w-4 text-primary" /> Received Files
+                  <span className="ml-auto text-xs font-normal bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                    {receivedFiles.length}
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {receivedFiles.map((file) => (
+                  <div key={file.id} className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 border border-border/50">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{file.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {file.lines.length} line{file.lines.length !== 1 ? 's' : ''} · {new Date(file.receivedAt).toLocaleTimeString()}
+                      </p>
+                    </div>
+                    <Button size="sm" variant="outline" className="gap-1.5 shrink-0 ml-2" onClick={() => handleDownloadFile(file)}>
+                      <Download className="h-3.5 w-3.5" /> Download
+                    </Button>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
           <Card className="glass-card shadow-card">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-sm">

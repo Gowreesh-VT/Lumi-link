@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Required to disable Next.js's own HTTP server — our custom server.js takes over
-  // This is needed so Socket.io can share the same port as Next.js
   reactStrictMode: true,
+  // Prevent Next.js from trying to bundle native/server-only modules
+  serverExternalPackages: ['serialport', '@serialport/parser-readline', 'socket.io'],
 };
 
 export default nextConfig;

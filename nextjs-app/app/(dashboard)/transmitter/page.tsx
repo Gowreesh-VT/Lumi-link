@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Send, Lightbulb, History } from 'lucide-react';
+import { Send, Lightbulb, History, Upload, FileText, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -19,9 +19,16 @@ export default function TransmitterPage() {
   const [progress, setProgress] = useState(0);
   const [isSending, setIsSending] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
-  // Keep a ref so we can clear the progress interval inside the ack handler
+
+  // File upload state
+  const [pendingFile, setPendingFile] = useState<{ name: string; lines: string[]; binary: boolean } | null>(null);
+  const [fileProgress, setFileProgress] = useState(0); // 0-100
+  const [isSendingFile, setIsSendingFile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const B64_CHUNK = 60; // base64 chars per chunk — safe for serial line buffer
+
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Track the pending message id so we can update its status on ack
   const pendingIdRef = useRef<string | null>(null);
 
   const systemStatus = useStore((s) => s.systemStatus);
@@ -109,6 +116,95 @@ export default function TransmitterPage() {
     });
   };
 
+  // ── File upload helpers ───────────────────────────────────────────────────
+
+  const BINARY_TYPES = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'video/mp4', 'application/octet-stream'];
+  const isBinaryFile = (f: File) => BINARY_TYPES.includes(f.type) || /\.(mp3|wav|ogg|mp4|aac|flac)$/i.test(f.name);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const binary = isBinaryFile(file);
+    const maxSize = binary ? 512 * 1024 : 10 * 1024; // 512 KB for binary, 10 KB for text
+    if (file.size > maxSize) {
+      toast.error('File too large', { description: `Max ${binary ? '512 KB' : '10 KB'} for this file type.` });
+      e.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    if (binary) {
+      reader.onload = (ev) => {
+        const buf = ev.target?.result as ArrayBuffer;
+        const bytes = new Uint8Array(buf);
+        // Convert to base64 string
+        let b64 = '';
+        bytes.forEach((b) => { b64 += String.fromCharCode(b); });
+        const encoded = btoa(b64);
+        // Split into fixed-size chunks
+        const lines: string[] = [];
+        for (let i = 0; i < encoded.length; i += B64_CHUNK) {
+          lines.push(encoded.slice(i, i + B64_CHUNK));
+        }
+        if (lines.length === 0) { toast.error('Empty file'); return; }
+        setPendingFile({ name: file.name, lines, binary: true });
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      reader.onload = (ev) => {
+        const text = (ev.target?.result as string) ?? '';
+        const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+        if (lines.length === 0) { toast.error('Empty file'); return; }
+        setPendingFile({ name: file.name, lines, binary: false });
+      };
+      reader.readAsText(file);
+    }
+    e.target.value = '';
+  };
+
+  const handleSendFile = async () => {
+    if (!pendingFile) return;
+    const socket = getSocket();
+    setIsSendingFile(true);
+    setFileProgress(0);
+    const { name, lines } = pendingFile;
+
+    // Helper: send one message and wait for ack
+    const sendLine = (text: string, idx: number) =>
+      new Promise<void>((resolve) => {
+        const onAck = (data: { success: boolean; error?: string }) => {
+          socket.off('transmit_ack', onAck);
+          if (!data.success) toast.error(`Line ${idx + 1} failed`, { description: data.error });
+          resolve();
+        };
+        socket.on('transmit_ack', onAck);
+        socket.emit('send_message', { message: text });
+      });
+
+    // Start marker — different for binary vs text
+    const startMarker = pendingFile.binary
+      ? `__LIFI_FILE_START_B64__:${name}`
+      : `__LIFI_FILE_START__:${name}`;
+    await sendLine(startMarker, -1);
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      if (!pendingFile.binary) addMessage({ content: line, direction: 'sent', status: 'pending' });
+      await sendLine(line, i);
+      setFileProgress(Math.round(((i + 1) / lines.length) * 100));
+    }
+
+    // Send end marker
+    await sendLine('__LIFI_FILE_END__', -1);
+
+    toast.success('File transmitted', { description: `${name} — ${lines.length} chunk(s) sent` });
+    setIsSendingFile(false);
+    setFileProgress(0);
+    setPendingFile(null);
+  };
+
   const handleSend = () => {
     if (!message.trim()) {
       toast.error('Please enter a message');
@@ -177,6 +273,7 @@ export default function TransmitterPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Text message input */}
               <div className="space-y-2">
                 <Label htmlFor="message">Message</Label>
                 <div className="flex gap-2">
@@ -186,9 +283,9 @@ export default function TransmitterPage() {
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    disabled={isSending}
+                    disabled={isSending || isSendingFile}
                   />
-                  <Button onClick={handleSend} disabled={isSending || !message.trim()} className="gap-2 shrink-0">
+                  <Button onClick={handleSend} disabled={isSending || isSendingFile || !message.trim()} className="gap-2 shrink-0">
                     <Send className="h-4 w-4" />
                     {isSending ? 'Sending...' : 'Send'}
                   </Button>
@@ -202,6 +299,69 @@ export default function TransmitterPage() {
                     <span>{progress}%</span>
                   </div>
                   <Progress value={progress} />
+                </div>
+              )}
+
+              {/* Divider */}
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <div className="flex-1 h-px bg-border" />
+                <span>or send a file</span>
+                <div className="flex-1 h-px bg-border" />
+              </div>
+
+              {/* File upload */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".txt,.md,.csv,.log,.mp3,.wav,.ogg,.aac,.flac,.mp4"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+              {!pendingFile ? (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isSending || isSendingFile}
+                  className="w-full border-2 border-dashed border-border rounded-lg p-6 flex flex-col items-center gap-2 text-muted-foreground hover:border-primary hover:text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Upload className="h-6 w-6" />
+                  <span className="text-sm font-medium">Click to upload a file</span>
+                  <span className="text-xs">Text (.txt .md .csv) · Audio (.mp3 .wav .ogg) · Max 512 KB</span>
+                </button>
+              ) : (
+                <div className="rounded-lg border border-border bg-secondary/40 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <FileText className="h-4 w-4 text-primary" />
+                      {pendingFile.name}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPendingFile(null)}
+                      disabled={isSendingFile}
+                      className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{pendingFile.lines.length} line(s) to transmit</p>
+                  {isSendingFile && (
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>Transmitting file...</span>
+                        <span>{fileProgress}%</span>
+                      </div>
+                      <Progress value={fileProgress} />
+                    </div>
+                  )}
+                  <Button
+                    onClick={handleSendFile}
+                    disabled={isSendingFile || isSending}
+                    className="w-full gap-2"
+                  >
+                    <Send className="h-4 w-4" />
+                    {isSendingFile ? `Sending line ${Math.round((fileProgress / 100) * pendingFile.lines.length)} / ${pendingFile.lines.length}...` : 'Send File over Li-Fi'}
+                  </Button>
                 </div>
               )}
             </CardContent>

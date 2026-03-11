@@ -10,9 +10,10 @@ export function Header() {
   const theme = useStore((s) => s.theme);
   const toggleTheme = useStore((s) => s.toggleTheme);
   const { toggleSidebar } = useSidebar();
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const [currentTime, setCurrentTime] = useState<Date | null>(null);
 
   useEffect(() => {
+    setCurrentTime(new Date());
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
@@ -33,10 +34,10 @@ export function Header() {
         <div className="flex items-center gap-4">
           <div className="hidden sm:flex flex-col items-end text-sm">
             <span className="font-mono font-medium">
-              {currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              {currentTime?.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) ?? ''}
             </span>
             <span className="text-xs text-muted-foreground">
-              {currentTime.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
+              {currentTime?.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' }) ?? ''}
             </span>
           </div>
           <Button variant="ghost" size="icon" onClick={toggleTheme}>

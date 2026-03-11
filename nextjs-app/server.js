@@ -18,7 +18,8 @@ import {
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || 'localhost';
 const port = parseInt(process.env.PORT || '3000', 10);
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || `http://${hostname}:${port}`;
+// Allow connections from any device on the local network
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || '*';
 
 const TX_PORT_PATH = process.env.TX_PORT;   // e.g. /dev/cu.usbserial-TX
 const RX_PORT_PATH = process.env.RX_PORT;   // e.g. /dev/cu.usbserial-RX
@@ -50,6 +51,8 @@ const io = new SocketIOServer(httpServer, {
 
 // ─── Serial port helpers ─────────────────────────────────────────────────────
 
+const RETRY_INTERVAL_MS = 3000;
+
 function openSerialPort(path, label) {
   if (!path) {
     console.warn(`[serial] ${label} port not configured — set ${label}_PORT in .env`);
@@ -58,21 +61,27 @@ function openSerialPort(path, label) {
 
   const sp = new SerialPort({ path, baudRate: BAUD_RATE, autoOpen: false });
 
-  sp.open((err) => {
-    if (err) {
-      console.error(`[serial] Failed to open ${label} (${path}):`, err.message);
-    } else {
-      console.log(`[serial] ${label} open: ${path} @ ${BAUD_RATE} baud`);
-      syncHardwareStatus();
-    }
-  });
+  function tryOpen() {
+    if (sp.isOpen) return;
+    sp.open((err) => {
+      if (err) {
+        console.error(`[serial] Failed to open ${label} (${path}): ${err.message} — retrying in ${RETRY_INTERVAL_MS / 1000}s`);
+        setTimeout(tryOpen, RETRY_INTERVAL_MS);
+      } else {
+        console.log(`[serial] ${label} open: ${path} @ ${BAUD_RATE} baud`);
+        syncHardwareStatus();
+      }
+    });
+  }
 
   sp.on('close', () => {
-    console.log(`[serial] ${label} closed`);
+    console.log(`[serial] ${label} closed — retrying in ${RETRY_INTERVAL_MS / 1000}s`);
     syncHardwareStatus();
+    setTimeout(tryOpen, RETRY_INTERVAL_MS);
   });
   sp.on('error', (err) => console.error(`[serial] ${label} error:`, err.message));
 
+  tryOpen();
   return sp;
 }
 
