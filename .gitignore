@@ -21,3 +21,5 @@ Thumbs.db
 # TypeScript
 *.tsbuildinfo
 nextjs-app/next-env.d.ts
+config.bat
+node_modules
