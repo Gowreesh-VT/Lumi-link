@@ -1,6 +1,3 @@
-// Custom Next.js server — starts Next.js + Socket.io + SerialPort on one port.
-// Run with: node server.js  (or npm run dev)
-
 import 'dotenv/config';
 import { createServer } from 'http';
 import { parse } from 'url';
@@ -18,14 +15,12 @@ import {
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || 'localhost';
 const port = parseInt(process.env.PORT || '3000', 10);
-// Allow connections from any device on the local network
+
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || '*';
 
-const TX_PORT_PATH = process.env.TX_PORT;   // e.g. /dev/cu.usbserial-TX
-const RX_PORT_PATH = process.env.RX_PORT;   // e.g. /dev/cu.usbserial-RX
+const TX_PORT_PATH = process.env.TX_PORT;   
+const RX_PORT_PATH = process.env.RX_PORT;   
 const BAUD_RATE = parseInt(process.env.BAUD_RATE || '115200', 10);
-
-// ─── Next.js ────────────────────────────────────────────────────────────────
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
@@ -33,14 +28,10 @@ const handle = app.getRequestHandler();
 await app.prepare();
 console.log(`> Next.js ready`);
 
-// ─── HTTP server (shared with Socket.io) ────────────────────────────────────
-
 const httpServer = createServer(async (req, res) => {
   const parsedUrl = parse(req.url, true);
   await handle(req, res, parsedUrl);
 });
-
-// ─── Socket.io ──────────────────────────────────────────────────────────────
 
 const io = new SocketIOServer(httpServer, {
   cors: {
@@ -48,8 +39,6 @@ const io = new SocketIOServer(httpServer, {
     methods: ['GET', 'POST'],
   },
 });
-
-// ─── Serial port helpers ─────────────────────────────────────────────────────
 
 const RETRY_INTERVAL_MS = 3000;
 
@@ -88,7 +77,6 @@ function openSerialPort(path, label) {
 const txPort = openSerialPort(TX_PORT_PATH, 'TX');
 const rxPort = openSerialPort(RX_PORT_PATH, 'RX');
 
-// Sync the shared singleton + broadcast to all clients
 function syncHardwareStatus() {
   const patch = {
     txConnected: !!txPort?.isOpen,
@@ -99,7 +87,6 @@ function syncHardwareStatus() {
   io.emit('system_status', getSocketStatus());
 }
 
-// Forward every newline-delimited line from the RX ESP32 → all browser clients
 if (rxPort) {
   const parser = rxPort.pipe(new ReadlineParser({ delimiter: '\n' }));
   parser.on('data', (line) => {
@@ -107,14 +94,11 @@ if (rxPort) {
     if (!text) return;
     console.log(`[RX] ${text}`);
 
-    // Store in shared state so GET /api/messages returns real data
     addStoredMessage({ content: text, direction: 'received', status: 'success' });
 
     io.emit('received_message', { message: text, timestamp: new Date().toISOString() });
   });
 }
-
-// ─── Socket.io events ────────────────────────────────────────────────────────
 
 function getSocketStatus() {
   const hw = getHardwareStatus();
@@ -129,10 +113,8 @@ function getSocketStatus() {
 io.on('connection', (socket) => {
   console.log(`[socket] connected: ${socket.id}`);
 
-  // Give the new client the current status immediately
   socket.emit('system_status', getSocketStatus());
 
-  // Browser wants to transmit a message via Li-Fi
   socket.on('send_message', ({ message }) => {
     if (!message || typeof message !== 'string') return;
     const safe = message.replace(/[\r\n]+/g, ' ').trim();
@@ -146,25 +128,32 @@ io.on('connection', (socket) => {
 
     console.log(`[TX] ${safe}`);
 
-    // Record in shared state (pending → updated to success/error on ack)
     const stored = addStoredMessage({ content: safe, direction: 'sent', status: 'pending' });
 
-    if (txPort?.isOpen) {
-      txPort.write(`${safe}\n`, (err) => {
-        const status = err ? 'error' : 'success';
-        updateStoredMessageStatus(stored.id, status);
-        socket.emit('transmit_ack', err
-          ? { success: false, error: err.message, id: stored.id }
-          : { success: true, id: stored.id });
-      });
+    if (txPort?.isOpen && !txPort.destroyed) {
+      try {
+        txPort.write(`${safe}\n`, (err) => {
+          const status = err ? 'error' : 'success';
+          updateStoredMessageStatus(stored.id, status);
+          socket.emit('transmit_ack', err
+            ? { success: false, error: err.message, id: stored.id }
+            : { success: true, id: stored.id });
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[TX] Write error:', msg);
+        updateStoredMessageStatus(stored.id, 'error');
+        syncHardwareStatus();
+        socket.emit('transmit_ack', { success: false, error: msg, id: stored.id });
+      }
     } else {
       updateStoredMessageStatus(stored.id, 'error');
       console.warn('[TX] Port not open — message not sent to hardware');
       socket.emit('transmit_ack', { success: false, error: 'TX serial port not connected', id: stored.id });
     }
+
   });
 
-  // Dashboard / transmitter page requests to start or stop transmission
   socket.on('start_transmission', () => {
     updateHardwareStatus({ transmissionActive: true });
     console.log('[TX] Transmission started');
@@ -182,12 +171,9 @@ io.on('connection', (socket) => {
   });
 });
 
-// Broadcast status updates every 5 s
 setInterval(() => {
   syncHardwareStatus();
 }, 5000);
-
-// ─── Start ──────────────────────────────────────────────────────────────────
 
 httpServer.listen(port, () => {
   console.log(`\n> LumiLink running at http://${hostname}:${port}`);

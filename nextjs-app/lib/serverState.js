@@ -1,12 +1,3 @@
-/**
- * lib/serverState.js
- *
- * Plain-JS singleton imported by server.js (Node ESM, no TS compilation).
- * The TypeScript counterpart (serverState.ts) is imported by Next.js API routes
- * after transpilation — both resolve to the same module cache entry at runtime
- * because they share the same process.
- */
-
 const MAX_MESSAGES = 200;
 
 const state = {
@@ -22,8 +13,6 @@ const state = {
     ssid: 'LiFi-Network',
   },
 };
-
-// ── Messages ──────────────────────────────────────────────────────────────────
 
 export function addStoredMessage(msg) {
   const full = {
@@ -51,8 +40,6 @@ export function clearStoredMessages() {
   state.messages = [];
 }
 
-// ── Hardware status ───────────────────────────────────────────────────────────
-
 export function updateHardwareStatus(patch) {
   Object.assign(state.hardware, patch, { updatedAt: new Date().toISOString() });
 }
@@ -60,8 +47,6 @@ export function updateHardwareStatus(patch) {
 export function getHardwareStatus() {
   return { ...state.hardware };
 }
-
-// ── Wi-Fi settings ────────────────────────────────────────────────────────────
 
 export function getWifiSettings() {
   return { ...state.wifiSettings };

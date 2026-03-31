@@ -29,7 +29,7 @@ export function AppSidebar() {
   const isCollapsed = state === 'collapsed';
 
   const isActive = (url: string) => {
-    // Home only matches exactly; other routes match prefix
+
     if (url === '/') return pathname === '/';
     return pathname === url || pathname.startsWith(url + '/');
   };

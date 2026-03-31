@@ -4,7 +4,7 @@ import { persist } from 'zustand/middleware';
 export interface Message {
   id: string;
   content: string;
-  /** ISO 8601 string — use `new Date(timestamp)` when displaying */
+
   timestamp: string;
   direction: 'sent' | 'received';
   status: 'success' | 'error' | 'pending';
@@ -38,6 +38,10 @@ interface AppState {
 
   wifiSettings: { ssid: string; password: string };
   updateWifiSettings: (settings: Partial<AppState['wifiSettings']>) => void;
+
+  simulationQueue: Array<{ id: string; content: string; timestamp: string }>;
+  pushSimulationMessage: (content: string) => void;
+  clearSimulationQueue: () => void;
 }
 
 export const useStore = create<AppState>()(
@@ -65,7 +69,7 @@ export const useStore = create<AppState>()(
           messages: [
             ...s.messages,
             { ...message, id: Math.random().toString(36).slice(2, 9), timestamp: new Date().toISOString() },
-          ].slice(-100), // keep last 100, newest at the end
+          ].slice(-100), 
         })),
       updateMessageStatus: (id, status) =>
         set((s) => ({
@@ -79,6 +83,16 @@ export const useStore = create<AppState>()(
       wifiSettings: { ssid: 'LiFi-Network', password: '' },
       updateWifiSettings: (settings) =>
         set((s) => ({ wifiSettings: { ...s.wifiSettings, ...settings } })),
+
+      simulationQueue: [],
+      pushSimulationMessage: (content) =>
+        set((s) => ({
+          simulationQueue: [
+            ...s.simulationQueue,
+            { id: Math.random().toString(36).slice(2, 9), content, timestamp: new Date().toISOString() },
+          ],
+        })),
+      clearSimulationQueue: () => set({ simulationQueue: [] }),
     }),
     {
       name: 'lumi-link-storage',

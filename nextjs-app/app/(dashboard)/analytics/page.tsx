@@ -17,7 +17,6 @@ type Range = typeof timeRanges[number];
 export default function AnalyticsPage() {
   const [range, setRange] = useState<Range>('24 Hours');
 
-  // Memoized so the random data doesn't regenerate on every render
   const data = useMemo(() => {
     const points = range === '1 Hour' ? 60 : range === '24 Hours' ? 24 : 7;
     return generateSignalData(points);
@@ -57,7 +56,6 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      {/* Summary cards */}
       <div className="grid gap-4 md:grid-cols-3">
         {[
           { label: 'Avg Signal Strength', value: `${avgSignal}%` },
@@ -75,7 +73,6 @@ export default function AnalyticsPage() {
         ))}
       </div>
 
-      {/* Throughput chart */}
       <Card className="glass-card shadow-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -97,7 +94,6 @@ export default function AnalyticsPage() {
         </CardContent>
       </Card>
 
-      {/* Error rate bar chart */}
       <Card className="glass-card shadow-card">
         <CardHeader>
           <CardTitle>Error Rate</CardTitle>
