@@ -1,0 +1,40 @@
+{
+  "title": "LumiLink Telemetry",
+  "uid": "lifi-dashboard-01",
+  "refresh": "2s",
+  "panels": [
+    {
+      "title": "Li-Fi Receiver (RX) Throughput",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [{ "expr": "rate(lifi_bytes_received_total[5s])", "legendFormat": "Bytes/sec" }]
+    },
+    {
+      "title": "Li-Fi Transmitter (TX) Throughput",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [{ "expr": "rate(lifi_bytes_sent_total[5s])", "legendFormat": "Bytes/sec" }]
+    },
+    {
+      "title": "Manchester Decode Errors",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 8, "w": 6, "h": 6 },
+      "targets": [{ "expr": "lifi_decode_errors_total", "legendFormat": "Total Corruptions" }]
+    },
+    {
+      "title": "Hardware Connection Status",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 8, "w": 6, "h": 6 },
+      "targets": [{ "expr": "lifi_hardware_connected", "legendFormat": "Active Status" }]
+    },
+    {
+      "title": "Messages Transferred",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 6 },
+      "targets": [
+        { "expr": "lifi_messages_sent_total", "legendFormat": "Sent" },
+        { "expr": "lifi_messages_received_total", "legendFormat": "Received" }
+      ]
+    }
+  ]
+}
