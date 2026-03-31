@@ -20,13 +20,12 @@ export default function TransmitterPage() {
   const [isSending, setIsSending] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
 
-  // File upload state
   const [pendingFile, setPendingFile] = useState<{ name: string; lines: string[]; binary: boolean } | null>(null);
-  const [fileProgress, setFileProgress] = useState(0); // 0-100
+  const [fileProgress, setFileProgress] = useState(0); 
   const [isSendingFile, setIsSendingFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const B64_CHUNK = 60; // base64 chars per chunk — safe for serial line buffer
+  const B64_CHUNK = 60; 
 
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingIdRef = useRef<string | null>(null);
@@ -38,8 +37,8 @@ export default function TransmitterPage() {
   const messages = useStore((s) => s.messages);
   const addMessage = useStore((s) => s.addMessage);
   const updateMessageStatus = useStore((s) => s.updateMessageStatus);
+  const pushSimulationMessage = useStore((s) => s.pushSimulationMessage);
 
-  // ── Socket setup ──────────────────────────────────────────────────────────
   useEffect(() => {
     const socket = getSocket();
     socket.connect();
@@ -50,9 +49,8 @@ export default function TransmitterPage() {
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
 
-    // Ack from server after write to TX serial port
     socket.on('transmit_ack', (data: { success: boolean; error?: string }) => {
-      // Stop the progress animation now that we have the ack
+
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = null;
@@ -76,7 +74,6 @@ export default function TransmitterPage() {
       setTimeout(() => setProgress(0), 800);
     });
 
-    // Real-time connection status from server
     socket.on('system_status', (data: { lifiConnected: boolean; txConnected: boolean; rxConnected: boolean }) => {
       updateSystemStatus({
         lifiConnected: data.lifiConnected,
@@ -96,7 +93,6 @@ export default function TransmitterPage() {
     };
   }, [updateSystemStatus, updateMessageStatus]);
 
-  // Wire the Start/Stop Transmission toggle to the server
   const handleTransmissionToggle = () => {
     const next = !isTransmitting;
     setIsTransmitting(next);
@@ -107,16 +103,12 @@ export default function TransmitterPage() {
     });
   };
 
-  // ── Actions ───────────────────────────────────────────────────────────────
-
   const handleLedToggle = () => {
     updateSystemStatus({ ledStatus: !systemStatus.ledStatus });
     toast(systemStatus.ledStatus ? 'LED Off' : 'LED On', {
       description: `Transmitter LED turned ${!systemStatus.ledStatus ? 'on' : 'off'}`,
     });
   };
-
-  // ── File upload helpers ───────────────────────────────────────────────────
 
   const BINARY_TYPES = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'video/mp4', 'application/octet-stream'];
   const isBinaryFile = (f: File) => BINARY_TYPES.includes(f.type) || /\.(mp3|wav|ogg|mp4|aac|flac)$/i.test(f.name);
@@ -126,7 +118,7 @@ export default function TransmitterPage() {
     if (!file) return;
 
     const binary = isBinaryFile(file);
-    const maxSize = binary ? 512 * 1024 : 10 * 1024; // 512 KB for binary, 10 KB for text
+    const maxSize = binary ? 512 * 1024 : 10 * 1024; 
     if (file.size > maxSize) {
       toast.error('File too large', { description: `Max ${binary ? '512 KB' : '10 KB'} for this file type.` });
       e.target.value = '';
@@ -138,11 +130,11 @@ export default function TransmitterPage() {
       reader.onload = (ev) => {
         const buf = ev.target?.result as ArrayBuffer;
         const bytes = new Uint8Array(buf);
-        // Convert to base64 string
+
         let b64 = '';
         bytes.forEach((b) => { b64 += String.fromCharCode(b); });
         const encoded = btoa(b64);
-        // Split into fixed-size chunks
+
         const lines: string[] = [];
         for (let i = 0; i < encoded.length; i += B64_CHUNK) {
           lines.push(encoded.slice(i, i + B64_CHUNK));
@@ -170,7 +162,6 @@ export default function TransmitterPage() {
     setFileProgress(0);
     const { name, lines } = pendingFile;
 
-    // Helper: send one message and wait for ack
     const sendLine = (text: string, idx: number) =>
       new Promise<void>((resolve) => {
         const onAck = (data: { success: boolean; error?: string }) => {
@@ -182,7 +173,6 @@ export default function TransmitterPage() {
         socket.emit('send_message', { message: text });
       });
 
-    // Start marker — different for binary vs text
     const startMarker = pendingFile.binary
       ? `__LIFI_FILE_START_B64__:${name}`
       : `__LIFI_FILE_START__:${name}`;
@@ -196,7 +186,6 @@ export default function TransmitterPage() {
       setFileProgress(Math.round(((i + 1) / lines.length) * 100));
     }
 
-    // Send end marker
     await sendLine('__LIFI_FILE_END__', -1);
 
     toast.success('File transmitted', { description: `${name} — ${lines.length} chunk(s) sent` });
@@ -214,24 +203,42 @@ export default function TransmitterPage() {
     setIsSending(true);
     setProgress(10);
 
-    // Animate progress bar — will be cleared inside transmit_ack handler
     progressIntervalRef.current = setInterval(() => {
       setProgress((p) => (p < 85 ? p + 15 : p));
     }, 200);
 
-    // Add to local message history optimistically and capture the generated id
-    // addMessage prepends with a random id; we retrieve it from the store after
     const socket = getSocket();
     const trimmed = message.trim();
 
     addMessage({ content: trimmed, direction: 'sent', status: 'pending' });
 
-    // The addMessage call is synchronous in Zustand — grab the newest message's id
     const msgs = useStore.getState().messages;
     const latest = msgs[msgs.length - 1];
     pendingIdRef.current = latest?.id ?? null;
 
-    socket.emit('send_message', { message: trimmed });
+    if (socketConnected) {
+      socket.emit('send_message', { message: trimmed });
+    } else {
+      setTimeout(() => {
+        pushSimulationMessage(trimmed);
+      }, 900);
+
+      setTimeout(() => {
+        if (progressIntervalRef.current) {
+          clearInterval(progressIntervalRef.current);
+          progressIntervalRef.current = null;
+        }
+        setIsSending(false);
+        setProgress(100);
+        if (pendingIdRef.current) {
+          updateMessageStatus(pendingIdRef.current, 'success');
+        }
+        pendingIdRef.current = null;
+        setTimeout(() => setProgress(0), 800);
+        toast.success('Transmitted (simulation)', { description: 'Message queued for receiver' });
+      }, 950);
+    }
+
     setMessage('');
   };
 
@@ -241,7 +248,6 @@ export default function TransmitterPage() {
 
   const sentMessages = messages.filter((m) => m.direction === 'sent');
 
-  // ── UI ────────────────────────────────────────────────────────────────────
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }} className="space-y-6">
       <div className="flex items-center justify-between">
@@ -264,7 +270,7 @@ export default function TransmitterPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Compose + send */}
+
         <div className="lg:col-span-2 space-y-6">
           <Card className="glass-card shadow-card">
             <CardHeader>
@@ -273,7 +279,7 @@ export default function TransmitterPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Text message input */}
+
               <div className="space-y-2">
                 <Label htmlFor="message">Message</Label>
                 <div className="flex gap-2">
@@ -302,14 +308,12 @@ export default function TransmitterPage() {
                 </div>
               )}
 
-              {/* Divider */}
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
                 <div className="flex-1 h-px bg-border" />
                 <span>or send a file</span>
                 <div className="flex-1 h-px bg-border" />
               </div>
 
-              {/* File upload */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -367,7 +371,6 @@ export default function TransmitterPage() {
             </CardContent>
           </Card>
 
-          {/* Sent history */}
           <Card className="glass-card shadow-card">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -406,7 +409,6 @@ export default function TransmitterPage() {
           </Card>
         </div>
 
-        {/* Controls */}
         <div className="space-y-6">
           <Card className="glass-card shadow-card">
             <CardHeader>
