@@ -11,6 +11,15 @@ import {
   updateHardwareStatus,
   getHardwareStatus,
 } from './lib/serverState.js';
+import {
+  metricsRegistry,
+  lifiMessagesSent,
+  lifiBytesSent,
+  lifiMessagesReceived,
+  lifiBytesReceived,
+  lifiDecodedErrors,
+  lifiHardwareConnected,
+} from './lib/metrics.js';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || 'localhost';
@@ -30,6 +39,14 @@ console.log(`> Next.js ready`);
 
 const httpServer = createServer(async (req, res) => {
   const parsedUrl = parse(req.url, true);
+  
+  // ── Native Prometheus Metrics Endpoint ──
+  if (parsedUrl.pathname === '/metrics') {
+    res.setHeader('Content-Type', metricsRegistry.contentType);
+    res.end(await metricsRegistry.metrics());
+    return;
+  }
+  
   await handle(req, res, parsedUrl);
 });
 
@@ -84,6 +101,7 @@ function syncHardwareStatus() {
     lifiConnected: !!(txPort?.isOpen && rxPort?.isOpen),
   };
   updateHardwareStatus(patch);
+  lifiHardwareConnected.set(patch.lifiConnected ? 1 : 0);
   io.emit('system_status', getSocketStatus());
 }
 
@@ -93,6 +111,14 @@ if (rxPort) {
     const text = line.trim();
     if (!text) return;
     console.log(`[RX] ${text}`);
+
+    // Telemetry instrumentation
+    lifiBytesReceived.inc(Buffer.byteLength(line, 'utf8'));
+    if (/\[([0-9A-Fa-f]{1,2})\]/.test(text)) {
+      lifiDecodedErrors.inc();
+    } else {
+      lifiMessagesReceived.inc();
+    }
 
     addStoredMessage({ content: text, direction: 'received', status: 'success' });
 
@@ -132,9 +158,14 @@ io.on('connection', (socket) => {
 
     if (txPort?.isOpen && !txPort.destroyed) {
       try {
-        txPort.write(`${safe}\n`, (err) => {
+        const payload = `${safe}\n`;
+        txPort.write(payload, (err) => {
           const status = err ? 'error' : 'success';
           updateStoredMessageStatus(stored.id, status);
+          if (!err) {
+            lifiMessagesSent.inc();
+            lifiBytesSent.inc(Buffer.byteLength(payload, 'utf8'));
+          }
           socket.emit('transmit_ack', err
             ? { success: false, error: err.message, id: stored.id }
             : { success: true, id: stored.id });
