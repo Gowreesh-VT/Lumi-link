@@ -1,0 +1,291 @@
+"""
+Firefly — Emergency Safety & Evacuation App
+Main application entry point with dual-role interface.
+
+Run: python app.py
+"""
+
+import customtkinter as ctk
+import threading
+import time
+
+# Configure appearance
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("dark-blue")
+
+from utils.theme import *
+from utils.simulator import SensorSimulator, SOSSimulator, EvacSimulator, ResponderSimulator
+from utils.fire_model import FireDetectionModel
+
+
+class FireflyApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+
+        # ── Window Setup ──
+        self.title("Firefly — Emergency Safety System")
+        self.geometry("1000x700")
+        self.minsize(900, 650)
+        self.configure(fg_color=BG_PRIMARY)
+
+        # ── Simulators ──
+        self.sensor_sim = SensorSimulator()
+        self.sos_sim = SOSSimulator()
+        self.evac_sim = EvacSimulator()
+        self.responder_sim = ResponderSimulator()
+
+        # ── Screen management ──
+        self.screens = {}
+        self.current_screen_name = None
+        self.current_role = None  # "need_help" or "help_others"
+
+        # Container for all screens
+        self.container = ctk.CTkFrame(self, fg_color=BG_PRIMARY)
+        self.container.pack(fill="both", expand=True)
+
+        # ML model for prediction
+        self.fire_model = FireDetectionModel()
+
+        # Show splash first
+        self._show_splash()
+
+    # ────────────────────────── Splash Screen ──────────────────────────
+
+    def _show_splash(self):
+        self.splash = ctk.CTkFrame(self.container, fg_color=BG_PRIMARY)
+        self.splash.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+        center = ctk.CTkFrame(self.splash, fg_color="transparent")
+        center.place(relx=0.5, rely=0.5, anchor="center")
+
+        ctk.CTkLabel(center, text="🛡", font=(FONT_FAMILY, 72)).pack()
+        ctk.CTkLabel(center, text="Firefly", font=FONT_HERO,
+                     text_color=ACCENT_CYAN).pack(pady=(PAD_MD, PAD_XS))
+        ctk.CTkLabel(center, text="Emergency Safety System",
+                     font=FONT_BODY, text_color=TEXT_MUTED).pack()
+
+        # Sensor check animation
+        self.check_label = ctk.CTkLabel(center, text="",
+                                        font=FONT_SMALL, text_color=TEXT_MUTED)
+        self.check_label.pack(pady=(PAD_LG, 0))
+
+        self.progress = ctk.CTkProgressBar(center, width=250, height=4,
+                                            progress_color=ACCENT_CYAN)
+        self.progress.set(0)
+        self.progress.pack(pady=(PAD_SM, 0))
+
+        # Run checks then transition
+        threading.Thread(target=self._run_splash_checks, daemon=True).start()
+
+    def _run_splash_checks(self):
+        checks = [
+            ("Checking sensors...", 0.25),
+            ("Verifying connectivity...", 0.50),
+            ("Loading maps...", 0.75),
+            ("System ready ✓", 1.0),
+        ]
+
+        for msg, progress in checks:
+            try:
+                self.check_label.configure(text=msg)
+                self.progress.set(progress)
+            except Exception:
+                pass
+            time.sleep(0.12)
+
+        # Transition to role selection
+        try:
+            self.after(100, self._init_screens)
+        except Exception:
+            pass
+
+    # ────────────────────────── Screen Initialization ──────────────────────────
+
+    def _init_screens(self):
+        # Destroy splash
+        self.splash.destroy()
+
+        # Import screens
+        from screens.dashboard import DashboardScreen
+        from screens.evac_mode import EvacScreen
+        from screens.sos_flow import SOSScreen
+        from screens.environment import EnvironmentScreen
+        from screens.settings import SettingsScreen
+        from screens.responder import ResponderScreen
+
+        # Create all screens
+        self.screens["role_select"] = self._create_role_select()
+        self.screens["dashboard"] = DashboardScreen(self.container, self)
+        self.screens["evac"] = EvacScreen(self.container, self)
+        self.screens["sos"] = SOSScreen(self.container, self)
+        self.screens["environment"] = EnvironmentScreen(self.container, self)
+        self.screens["settings"] = SettingsScreen(self.container, self)
+        self.screens["responder"] = ResponderScreen(self.container, self)
+
+        # Place all (hidden)
+        for screen in self.screens.values():
+            screen.place(relx=0, rely=0, relwidth=1, relheight=1)
+            screen.lower()
+
+        # Start with role selection
+        self.show_screen("role_select")
+
+        # Start sensor simulator
+        self.sensor_sim.start()
+
+        # Start update loop
+        self._update_loop()
+
+    # ────────────────────────── Role Selection ──────────────────────────
+
+    def _create_role_select(self):
+        frame = ctk.CTkFrame(self.container, fg_color=BG_PRIMARY)
+
+        # Center content
+        center = ctk.CTkFrame(frame, fg_color="transparent")
+        center.place(relx=0.5, rely=0.5, anchor="center")
+
+        # Logo
+        ctk.CTkLabel(center, text="🛡", font=(FONT_FAMILY, 56)).pack()
+        ctk.CTkLabel(center, text="Firefly", font=FONT_HERO,
+                     text_color=ACCENT_CYAN).pack(pady=(PAD_SM, PAD_XS))
+        ctk.CTkLabel(center, text="Choose how you want to use Firefly",
+                     font=FONT_BODY, text_color=TEXT_MUTED).pack(pady=(0, PAD_XL))
+
+        # Two role cards side by side
+        cards = ctk.CTkFrame(center, fg_color="transparent")
+        cards.pack()
+        cards.columnconfigure((0, 1), weight=1)
+
+        # ── I NEED HELP ──
+        need_help_card = ctk.CTkFrame(cards, fg_color=BG_CARD, corner_radius=CORNER_RADIUS_LG,
+                                      border_width=2, border_color=ROLE_NEED_HELP, width=320, height=350)
+        need_help_card.grid(row=0, column=0, padx=PAD_LG, sticky="nsew")
+        need_help_card.grid_propagate(False)
+
+        nh_inner = ctk.CTkFrame(need_help_card, fg_color="transparent")
+        nh_inner.place(relx=0.5, rely=0.5, anchor="center")
+
+        ctk.CTkLabel(nh_inner, text="🆘", font=(FONT_FAMILY, 64)).pack()
+        ctk.CTkLabel(nh_inner, text="I NEED HELP", font=FONT_TITLE,
+                     text_color=ROLE_NEED_HELP).pack(pady=(PAD_MD, PAD_SM))
+        ctk.CTkLabel(nh_inner, text="Get real-time threat alerts,\nevacuation guidance,\nand emergency SOS",
+                     font=FONT_BODY, text_color=TEXT_SECONDARY, justify="center").pack(pady=(0, PAD_LG))
+
+        need_btn = ctk.CTkButton(nh_inner, text="Enter →", width=200, height=48,
+                                 fg_color=ROLE_NEED_HELP, hover_color=ROLE_NEED_HELP_HOVER,
+                                 font=FONT_HEADING, corner_radius=CORNER_RADIUS,
+                                 command=lambda: self._select_role("need_help"))
+        need_btn.pack()
+
+        # ── I WANT TO HELP ──
+        help_card = ctk.CTkFrame(cards, fg_color=BG_CARD, corner_radius=CORNER_RADIUS_LG,
+                                 border_width=2, border_color=ROLE_HELP_OTHERS, width=320, height=350)
+        help_card.grid(row=0, column=1, padx=PAD_LG, sticky="nsew")
+        help_card.grid_propagate(False)
+
+        ho_inner = ctk.CTkFrame(help_card, fg_color="transparent")
+        ho_inner.place(relx=0.5, rely=0.5, anchor="center")
+
+        ctk.CTkLabel(ho_inner, text="🦸", font=(FONT_FAMILY, 64)).pack()
+        ctk.CTkLabel(ho_inner, text="I WANT TO HELP", font=FONT_TITLE,
+                     text_color=ROLE_HELP_OTHERS).pack(pady=(PAD_MD, PAD_SM))
+        ctk.CTkLabel(ho_inner, text="See people nearby who\nneed assistance and\nguide them to safety",
+                     font=FONT_BODY, text_color=TEXT_SECONDARY, justify="center").pack(pady=(0, PAD_LG))
+
+        help_btn = ctk.CTkButton(ho_inner, text="Enter →", width=200, height=48,
+                                 fg_color=ROLE_HELP_OTHERS, hover_color=ROLE_HELP_OTHERS_HOVER,
+                                 font=FONT_HEADING, corner_radius=CORNER_RADIUS,
+                                 command=lambda: self._select_role("help_others"))
+        help_btn.pack()
+
+        # Version text at bottom
+        ctk.CTkLabel(center, text="Firefly v1.0 — Prototype", font=FONT_TINY,
+                     text_color=TEXT_MUTED).pack(pady=(PAD_XL, 0))
+
+        return frame
+
+    def _select_role(self, role):
+        self.current_role = role
+        if role == "need_help":
+            self.show_screen("dashboard")
+        else:
+            self.show_screen("responder")
+
+    # ────────────────────────── Navigation ──────────────────────────
+
+    def show_screen(self, name):
+        # Lifecycle: leave current
+        if self.current_screen_name and self.current_screen_name in self.screens:
+            current = self.screens[self.current_screen_name]
+            if hasattr(current, "on_leave"):
+                current.on_leave()
+
+        # Show new
+        if name in self.screens:
+            self.screens[name].lift()
+            self.current_screen_name = name
+
+            # Lifecycle: enter new
+            if hasattr(self.screens[name], "on_enter"):
+                self.screens[name].on_enter()
+
+    # ────────────────────────── Update Loop ──────────────────────────
+
+    def _update_loop(self):
+
+        # Get latest sensor values
+        sensor_data = self.sensor_sim.get_data()
+
+        smoke = sensor_data["smoke"]
+        gas = sensor_data["gas"]
+        temp = sensor_data["temperature"]
+        humidity = sensor_data["humidity"]
+        shock = sensor_data["shock"]
+        motion = sensor_data["motion"]
+
+        # Run ML prediction
+        risk = self.fire_model.predict(
+            smoke,
+            gas,
+            temp,
+            humidity,
+            shock,
+            motion
+        )
+
+        # Store result globally
+        self.current_risk = risk
+
+        # Refresh screen
+        if self.current_screen_name and self.current_screen_name in self.screens:
+            screen = self.screens[self.current_screen_name]
+
+            if hasattr(screen, "refresh"):
+                try:
+                    screen.refresh()
+                except Exception:
+                    pass
+
+        self.after(1000, self._update_loop)
+
+    # ────────────────────────── Cleanup ──────────────────────────
+
+    def on_closing(self):
+        self.sensor_sim.stop()
+        self.evac_sim.stop()
+        self.responder_sim.stop()
+        
+        # Stop Arduino reader if instance exists (usually attached to dashboard)
+        if "dashboard" in self.screens:
+            dash = self.screens["dashboard"]
+            if hasattr(dash, "sensor_reader"):
+                dash.sensor_reader.stop()
+                
+        self.destroy()
+
+
+if __name__ == "__main__":
+    app = FireflyApp()
+    app.protocol("WM_DELETE_WINDOW", app.on_closing)
+    app.mainloop()
