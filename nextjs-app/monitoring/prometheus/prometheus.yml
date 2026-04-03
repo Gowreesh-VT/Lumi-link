@@ -1,7 +1,0 @@
-global:
-  scrape_interval: 2s # Aggressively scrape every 2 seconds for real-time telemetry
-
-scrape_configs:
-  - job_name: 'lifi-nextjs-server'
-    static_configs:
-      - targets: ['localhost:3000']
