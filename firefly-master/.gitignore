@@ -107,6 +107,10 @@ fabric.properties
 # Azure Toolkit for IntelliJ plugin
 # https://plugins.jetbrains.com/plugin/8053-azure-toolkit-for-intellij
 .idea/**/azureSettings.xml
+
+# Python cache files
+__pycache__/
+*.pyc
 ### Windows ###
 # Windows thumbnail cache files
 Thumbs.db
