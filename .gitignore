@@ -1,14 +1,15 @@
 # dependencies
-nextjs-app/node_modules/
+Light-Fidelity-Web-App/node_modules/
 
 # Next.js build output
-nextjs-app/.next/
-nextjs-app/out/
+Light-Fidelity-Web-App/.next/
+Light-Fidelity-Web-App/out/
 
 # environment variables — never commit secrets
-nextjs-app/.env
-nextjs-app/.env.local
-nextjs-app/.env.*.local
+Light-Fidelity-Web-App/.env
+Light-Fidelity-Web-App/.env.local
+Light-Fidelity-Web-App/.env.*.local
+Light-Fidelity-Web-App/.DS_Store
 
 # debug logs
 *.log
@@ -20,6 +21,7 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
-nextjs-app/next-env.d.ts
+Light-Fidelity-Web-App/next-env.d.ts
 config.bat
 node_modules
+.DS_Store
