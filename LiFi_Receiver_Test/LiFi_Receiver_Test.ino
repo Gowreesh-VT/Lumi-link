@@ -67,9 +67,9 @@ bool waitForStartBit(unsigned long timeoutMs = 5000) {
     if (millis() - t > timeoutMs) return false;
     delay(5);
   }
-  // Wait for start bit (LOW pulse)
+  // Wait for start bit (HIGH pulse) to match transmitter.
   t = millis();
-  while (readBit() != 0) {
+  while (readBit() != 1) {
     if (millis() - t > timeoutMs) return false;
     delay(5);
   }

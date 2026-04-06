@@ -2,6 +2,7 @@ const int sensorPin = 34;
 const int bitDelay  = 200;  
 
 int threshold = 1500; 
+String lineBuffer = "";
 
 void setup() {
   Serial.begin(115200);
@@ -70,13 +71,20 @@ void loop() {
   char c = receiveChar();
 
   if (c != '\0') {
+    if (c == '\r') {
+      return;
+    }
 
-    if ((c >= 32 && c <= 126) || c == '\n' || c == '\r') {
-      Serial.print(c);
-    } else {
-      Serial.print("[");
-      Serial.print((int)c, HEX);
-      Serial.print("]");
+    if (c == '\n') {
+      if (lineBuffer.length() > 0) {
+        Serial.println(lineBuffer);
+        lineBuffer = "";
+      }
+      return;
+    }
+
+    if ((c >= 32 && c <= 126) && lineBuffer.length() < 300) {
+      lineBuffer += c;
     }
   }
 }
