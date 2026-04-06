@@ -111,6 +111,12 @@ fabric.properties
 # Python cache files
 __pycache__/
 *.pyc
+
+# Python virtual environments
+.venv/
+.venv-*/
+.venv*/
+venv/
 ### Windows ###
 # Windows thumbnail cache files
 Thumbs.db

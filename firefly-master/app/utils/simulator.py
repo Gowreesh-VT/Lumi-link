@@ -120,6 +120,20 @@ class SensorSimulator:
                 "active_hazard": self.active_hazard,
             }
 
+    def get_data(self):
+        """Compatibility layer for screens/app expecting raw sensor-style fields."""
+        snap = self.get_snapshot()
+        return {
+            "smoke": int(snap["smoke_density"] * 10),
+            "gas": int(snap["toxic_gas"] * 8),
+            "temperature": float(snap["temperature"]),
+            "humidity": 50.0,
+            "shock": 1 if snap["active_hazard"] == "earthquake" else 0,
+            "motion": 1 if snap["crowd_density"] > 70 else 0,
+            "aqi": snap["aqi"],
+            "hazard_level": snap["hazard_level"],
+        }
+
 
 class SOSSimulator:
     """Simulates SOS dispatch and responder tracking."""
