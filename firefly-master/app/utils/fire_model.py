@@ -4,6 +4,11 @@ import joblib
 import os
 import numpy as np
 
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
+
 
 class FireDetectionModel:
 
@@ -30,8 +35,12 @@ class FireDetectionModel:
         self.model = joblib.load(model_path)
 
     def predict(self, smoke, gas, temperature, humidity, shock, motion):
+        values = [smoke, gas, temperature, humidity, shock, motion]
 
-        X = np.array([[smoke, gas, temperature, humidity, shock, motion]])
+        if pd is not None and hasattr(self.model, "feature_names_in_"):
+            X = pd.DataFrame([values], columns=list(self.model.feature_names_in_))
+        else:
+            X = np.array([values])
 
         pred = self.model.predict(X)[0]
 

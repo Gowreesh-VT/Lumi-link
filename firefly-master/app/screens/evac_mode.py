@@ -7,6 +7,16 @@ from utils.theme import *
 
 
 class EvacScreen(ctk.CTkFrame):
+    TURN_TO_ARROW = {
+        "LEFT": "←",
+        "RIGHT": "→",
+        "FORWARD": "↑",
+        "BACK": "↓",
+        "U_TURN": "↩",
+        "FORWARD_LEFT": "↖",
+        "FORWARD_RIGHT": "↗",
+    }
+
     def __init__(self, parent, app):
         super().__init__(parent, fg_color=BG_PRIMARY)
         self.app = app
@@ -144,14 +154,24 @@ class EvacScreen(ctk.CTkFrame):
         self.evac_sim.stop()
 
     def refresh(self):
+        route = self.app.get_live_route_data() if hasattr(self.app, "get_live_route_data") else None
+        using_live_route = route and route.get("source") != "simulator"
+
         # Update direction
-        self.direction_arrow.configure(text=self.evac_sim.current_direction)
+        if using_live_route:
+            turn = str(route.get("next_turn", "FORWARD")).upper()
+            arrow = self.TURN_TO_ARROW.get(turn, "↑")
+            self.direction_arrow.configure(text=arrow)
+            self.route_status_label.configure(text=f"LiFi route: {turn}")
+        else:
+            self.direction_arrow.configure(text=self.evac_sim.current_direction)
+            self.route_status_label.configure(text=self.evac_sim.route_status)
 
         # Update distance & time
-        dist = self.evac_sim.distance_to_exit
+        dist = int(route.get("distance_m", 0)) if using_live_route else self.evac_sim.distance_to_exit
         self.distance_label.configure(text=f"{dist} m")
 
-        time_s = self.evac_sim.time_to_safety
+        time_s = int(max(0, dist * 0.75)) if using_live_route else self.evac_sim.time_to_safety
         mins = time_s // 60
         secs = time_s % 60
         self.time_label.configure(text=f"{mins}:{secs:02d}")
@@ -164,12 +184,9 @@ class EvacScreen(ctk.CTkFrame):
         else:
             self.time_label.configure(text_color=ACCENT_CYAN)
 
-        # Route status
-        self.route_status_label.configure(text=self.evac_sim.route_status)
-
         # Context card from active hazard
         data = self.sensor_sim.get_snapshot()
-        hazard_type = data.get("active_hazard", "fire") or "fire"
+        hazard_type = (route.get("hazard") if using_live_route else data.get("active_hazard")) or "fire"
         info = HAZARD_INFO.get(hazard_type, HAZARD_INFO["fire"])
 
         self.hazard_icon.configure(text=info["icon"])
@@ -179,7 +196,15 @@ class EvacScreen(ctk.CTkFrame):
 
         # Blocked zones
         blocked = self.evac_sim.blocked_zones
-        routing_text = "✓ Avoiding smoke zones\n✓ Avoiding crowd clusters\n✓ Clear path to Exit B"
-        if blocked:
-            routing_text += "\n⚠ Blocked: " + ", ".join(blocked[-3:])
+        if using_live_route:
+            target_exit = route.get("target_exit", "Exit A")
+            routing_text = (
+                "✓ LiFi route lock established\n"
+                f"✓ Target exit: {target_exit}\n"
+                "✓ Continue following optical guidance"
+            )
+        else:
+            routing_text = "✓ Avoiding smoke zones\n✓ Avoiding crowd clusters\n✓ Clear path to Exit B"
+            if blocked:
+                routing_text += "\n⚠ Blocked: " + ", ".join(blocked[-3:])
         self.routing_details.configure(text=routing_text)

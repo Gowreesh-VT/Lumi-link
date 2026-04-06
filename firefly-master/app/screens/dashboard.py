@@ -13,7 +13,7 @@ class DashboardScreen(ctk.CTkFrame):
         super().__init__(parent, fg_color=BG_PRIMARY)
         self.app = app
         self.sim = app.sensor_sim
-        self.sensor_reader = ArduinoSensorReader(port="COM11")
+        self.sensor_reader = ArduinoSensorReader(port=None)
         self.sensor_reader.on_fire_alert = lambda: self._trigger_test("fire")
         self.sensor_reader.on_gas_alert = lambda: self._trigger_test("gas")
         self.sensor_reader.on_shock_alert = lambda: self._trigger_test("earthquake")
@@ -206,9 +206,18 @@ class DashboardScreen(ctk.CTkFrame):
         
         # Update connectivity label in header using Arduino connection status
         conn = ard_data["connected"]
-        conn_text = "● Arduino Connected" if conn else "● Arduino Offline"
+        source = (ard_data.get("source") or "serial").upper()
+        conn_text = f"● {source} Connected" if conn else "● Sensor Offline"
         conn_lbl_color = STATUS_GREEN if conn else STATUS_RED
         self.connectivity_label.configure(text=conn_text, text_color=conn_lbl_color)
+
+        # Fallback from live stream to simulator values if feed is stale/disconnected.
+        if (not conn) or (ard_data.get("age_sec") and ard_data.get("age_sec", 0) > 3):
+            sim = self.sim.get_data()
+            self.signal_widgets["temperature"].configure(text=f"{sim['temperature']:.1f}°C")
+            self.signal_widgets["humidity"].configure(text=f"{sim['humidity']:.1f}%")
+            self.signal_widgets["smoke"].configure(text=f"{sim['smoke']}")
+            self.signal_widgets["gas"].configure(text=f"{sim['gas']}")
 
         # Auto-trigger EVAC mode on red
         if data["hazard_level"] == "red" and self.app.current_screen_name == "dashboard":

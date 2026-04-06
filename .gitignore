@@ -25,3 +25,7 @@ Light-Fidelity-Web-App/next-env.d.ts
 config.bat
 node_modules
 .DS_Store
+
+.venv/
+.venv
+./venv

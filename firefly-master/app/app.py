@@ -49,6 +49,59 @@ class FireflyApp(ctk.CTk):
         # Show splash first
         self._show_splash()
 
+    def get_live_sensor_data(self):
+        """Return LiFi/Arduino data when fresh; otherwise fallback to simulator."""
+        # If dashboard/sensor reader exists and has fresh data, use it.
+        dash = self.screens.get("dashboard") if hasattr(self, "screens") else None
+        if dash and hasattr(dash, "sensor_reader"):
+            live = dash.sensor_reader.get_latest_data()
+            if live.get("connected") and (live.get("age_sec") is None or live.get("age_sec", 999) <= 3):
+                return {
+                    "smoke": live.get("smoke", 0),
+                    "gas": live.get("gas", 0),
+                    "temperature": live.get("temperature", 0.0),
+                    "humidity": live.get("humidity", 0.0),
+                    "shock": live.get("shock", 0),
+                    "motion": live.get("motion", 0),
+                    "source": live.get("source", "serial"),
+                }
+
+        # Fallback to simulator stream.
+        sim = self.sensor_sim.get_data()
+        return {
+            "smoke": sim.get("smoke", 0),
+            "gas": sim.get("gas", 0),
+            "temperature": sim.get("temperature", 0.0),
+            "humidity": sim.get("humidity", 0.0),
+            "shock": sim.get("shock", 0),
+            "motion": sim.get("motion", 0),
+            "source": "simulator",
+        }
+
+    def get_live_route_data(self):
+        """Return LiFi route direction data when available; fallback to evac simulator."""
+        dash = self.screens.get("dashboard") if hasattr(self, "screens") else None
+        if dash and hasattr(dash, "sensor_reader"):
+            route = dash.sensor_reader.get_latest_route()
+            ttl_s = max(1.0, float(route.get("ttl_ms", 2500)) / 1000.0)
+            age = route.get("age_sec")
+            if route.get("connected") and age is not None and age <= ttl_s:
+                return {
+                    "next_turn": route.get("next_turn", "FORWARD"),
+                    "distance_m": float(route.get("distance_m", 0.0)),
+                    "target_exit": route.get("target_exit", "Exit A"),
+                    "hazard": route.get("hazard", "none"),
+                    "source": route.get("source", "lifi"),
+                }
+
+        return {
+            "next_turn": "SIM",
+            "distance_m": float(self.evac_sim.distance_to_exit),
+            "target_exit": "Exit B",
+            "hazard": (self.sensor_sim.get_snapshot().get("active_hazard") or "none"),
+            "source": "simulator",
+        }
+
     # ────────────────────────── Splash Screen ──────────────────────────
 
     def _show_splash(self):
@@ -233,9 +286,8 @@ class FireflyApp(ctk.CTk):
     # ────────────────────────── Update Loop ──────────────────────────
 
     def _update_loop(self):
-
-        # Get latest sensor values
-        sensor_data = self.sensor_sim.get_data()
+        # Get latest sensor values (LiFi/Arduino preferred, simulator fallback).
+        sensor_data = self.get_live_sensor_data()
 
         smoke = sensor_data["smoke"]
         gas = sensor_data["gas"]

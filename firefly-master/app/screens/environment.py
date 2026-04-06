@@ -146,27 +146,32 @@ class EnvironmentScreen(ctk.CTkFrame):
         return STATUS_RED
 
     def refresh(self):
-        data = self.sim.get_snapshot()
+        live = self.app.get_live_sensor_data() if hasattr(self.app, "get_live_sensor_data") else self.sim.get_data()
 
-        aqi = data["aqi"]
+        # Derive UI metrics from LiFi/Arduino values so environment view reflects live hardware.
+        smoke_raw = int(live.get("smoke", 0))
+        gas_raw = int(live.get("gas", 0))
+        temp = float(live.get("temperature", 0.0))
+
+        smoke = max(0, min(100, int(smoke_raw / 10)))
+        gas = max(0, min(100, int(gas_raw / 8)))
+        aqi = max(0, min(500, int(smoke_raw * 0.45 + gas_raw * 0.55)))
+
         aqi_color = self._get_color(aqi, 100, 200)
         self.aqi_value.configure(text=str(aqi), text_color=aqi_color)
         self.aqi_bar.configure(progress_color=aqi_color)
         self.aqi_bar.set(min(1, aqi / 500))
 
-        smoke = data["smoke_density"]
         smoke_color = self._get_color(smoke, 30, 60)
         self.smoke_value.configure(text=f"{smoke}%", text_color=smoke_color)
         self.smoke_bar.configure(progress_color=smoke_color)
         self.smoke_bar.set(smoke / 100)
 
-        gas = data["toxic_gas"]
         gas_color = self._get_color(gas, 20, 50)
         self.gas_value.configure(text=f"{gas}%", text_color=gas_color)
         self.gas_bar.configure(progress_color=gas_color)
         self.gas_bar.set(gas / 100)
 
-        temp = data["temperature"]
         temp_color = self._get_color(temp, 35, 45)
         self.temp_value.configure(text=f"{temp}°C", text_color=temp_color)
         self.temp_bar.configure(progress_color=temp_color)
