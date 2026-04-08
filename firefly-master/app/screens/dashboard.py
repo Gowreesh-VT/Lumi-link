@@ -14,6 +14,7 @@ class DashboardScreen(ctk.CTkFrame):
         self.app = app
         self.sim = app.sensor_sim
         self.sensor_reader = ArduinoSensorReader(port=None)
+        self.sensor_reader.start()
         self._build_ui()
 
     def _build_ui(self):
@@ -68,32 +69,15 @@ class DashboardScreen(ctk.CTkFrame):
 
         actions_frame = ctk.CTkFrame(body, fg_color="transparent")
         actions_frame.pack(fill="x", pady=(0, PAD_MD))
-        actions_frame.columnconfigure((0, 1, 2), weight=1)
+        actions_frame.columnconfigure(0, weight=1)
 
-        # Start Navigation
-        nav_btn = ctk.CTkButton(actions_frame, text="🧭\nNavigate", height=90,
+        # Start guidance
+        nav_btn = ctk.CTkButton(actions_frame, text="🧭\nGuide", height=90,
                                 fg_color=BG_CARD, hover_color=ACCENT_BLUE,
                                 font=FONT_SUBHEADING, corner_radius=CORNER_RADIUS,
                                 border_width=1, border_color=BORDER,
-                                command=lambda: self.app.show_screen("evac"))
-        nav_btn.grid(row=0, column=0, padx=(0, PAD_SM), sticky="nsew")
-
-        # SOS
-        sos_btn = ctk.CTkButton(actions_frame, text="🆘\nSOS", height=90,
-                                fg_color=STATUS_RED_BG, hover_color=STATUS_RED,
-                                font=FONT_SUBHEADING, corner_radius=CORNER_RADIUS,
-                                border_width=2, border_color=STATUS_RED,
-                                text_color=STATUS_RED,
-                                command=lambda: self.app.show_screen("sos"))
-        sos_btn.grid(row=0, column=1, padx=PAD_SM, sticky="nsew")
-
-        # I'm Safe
-        safe_btn = ctk.CTkButton(actions_frame, text="✋\nI'm Safe", height=90,
-                                 fg_color=BG_CARD, hover_color=STATUS_GREEN,
-                                 font=FONT_SUBHEADING, corner_radius=CORNER_RADIUS,
-                                 border_width=1, border_color=BORDER,
-                                 command=self._mark_safe)
-        safe_btn.grid(row=0, column=2, padx=(PAD_SM, 0), sticky="nsew")
+                                command=lambda: self.app.show_screen("guide"))
+        nav_btn.grid(row=0, column=0, sticky="nsew")
 
         # ── Live Signals Strip ──
         signals_label = ctk.CTkLabel(body, text="LIVE SIGNALS", font=FONT_SMALL,
@@ -123,52 +107,24 @@ class DashboardScreen(ctk.CTkFrame):
             val.pack(pady=(PAD_XS, 0))
             self.signal_widgets[key] = val
 
-        # ── Simulated Danger Button (for testing) ──
-        test_label = ctk.CTkLabel(body, text="SIMULATION CONTROLS", font=FONT_SMALL,
-                                  text_color=TEXT_MUTED, anchor="w")
-        test_label.pack(fill="x", pady=(PAD_SM, PAD_XS))
-
-        test_frame = ctk.CTkFrame(body, fg_color=BG_CARD, corner_radius=CORNER_RADIUS,
-                                  border_width=1, border_color=BORDER)
-        test_frame.pack(fill="x", pady=(0, PAD_MD))
-
-        test_inner = ctk.CTkFrame(test_frame, fg_color="transparent")
-        test_inner.pack(padx=PAD_MD, pady=PAD_MD, fill="x")
-        test_inner.columnconfigure((0, 1, 2, 3), weight=1)
-
-        hazards = [("🔥 Fire", "fire"), ("☁ Gas", "gas"), ("🌍 Quake", "earthquake"), ("☣ Chem", "chemical")]
-        for i, (label, htype) in enumerate(hazards):
-            btn = ctk.CTkButton(test_inner, text=label, height=36,
-                                fg_color=BG_INPUT, hover_color=BG_SECONDARY,
-                                font=FONT_SMALL, corner_radius=CORNER_RADIUS_SM,
-                                command=lambda h=htype: self._trigger_test(h))
-            btn.grid(row=0, column=i, padx=PAD_XS, sticky="ew")
-
-        reset_btn = ctk.CTkButton(test_frame, text="Reset to Safe", height=32,
-                                  fg_color=STATUS_GREEN_BG, hover_color=STATUS_GREEN,
-                                  text_color=STATUS_GREEN, font=FONT_SMALL,
-                                  corner_radius=CORNER_RADIUS_SM,
-                                  command=self._reset_safe)
-        reset_btn.pack(padx=PAD_MD, pady=(0, PAD_MD), fill="x")
-
-        # ── Back to role selection ──
-        back_btn = ctk.CTkButton(body, text="← Switch Role", height=36,
-                                 fg_color="transparent", hover_color=BG_CARD,
-                                 text_color=TEXT_MUTED, font=FONT_SMALL,
-                                 command=lambda: self.app.show_screen("role_select"))
-        back_btn.pack(pady=(PAD_SM, PAD_LG))
-
-    def _trigger_test(self, hazard_type):
-        self.sim.trigger_emergency(hazard_type)
-
-    def _reset_safe(self):
-        self.sim.reset_to_safe()
-
-    def _mark_safe(self):
-        self.sim.reset_to_safe()
-
     def refresh(self):
         """Called by the app's update loop to refresh UI."""
+        if hasattr(self, "sensor_reader") and not self.sensor_reader.is_running:
+            self.sensor_reader.start()
+
+        if getattr(self.app, "space_hold_active", False):
+            self.banner_frame.configure(fg_color=STATUS_AMBER_BG, border_width=2, border_color=STATUS_AMBER)
+            self.banner_icon.configure(text="⚠", text_color=STATUS_AMBER)
+            self.banner_title.configure(text="DATA UNAVAILABLE", text_color=STATUS_AMBER)
+            self.banner_desc.configure(text="Space bar held. Point towards the lights.", text_color=TEXT_SECONDARY)
+
+            self.signal_widgets["temperature"].configure(text="N/A", text_color=STATUS_AMBER)
+            self.signal_widgets["humidity"].configure(text="N/A", text_color=STATUS_AMBER)
+            self.signal_widgets["smoke"].configure(text="N/A", text_color=STATUS_AMBER)
+            self.signal_widgets["gas"].configure(text="N/A", text_color=STATUS_AMBER)
+            self.connectivity_label.configure(text="● Data unavailable (SPACE held)", text_color=STATUS_AMBER)
+            return
+
         data = self.sim.get_snapshot()
 
         # Update banner from ML-driven app state.
@@ -206,9 +162,15 @@ class DashboardScreen(ctk.CTkFrame):
         conn = ard_data["connected"]
         source = (ard_data.get("source") or "serial").upper()
         age = ard_data.get("age_sec")
+        port = ard_data.get("port") or "n/a"
+        err = ard_data.get("error") or ""
         is_stale = bool(conn and age is not None and age > 3)
         if not conn:
-            conn_text = "● Sensor Offline (SIM Fallback)"
+            short_err = err[:50] + ("..." if len(err) > 50 else "")
+            if short_err:
+                conn_text = f"● Sensor Offline [{port}] {short_err}"
+            else:
+                conn_text = f"● Sensor Offline [{port}] (SIM Fallback)"
             conn_lbl_color = STATUS_RED
         elif is_stale:
             conn_text = f"● {source} Stale ({age:.1f}s) - SIM Fallback"

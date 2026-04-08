@@ -1,6 +1,6 @@
 """
-Firefly — Emergency Safety & Evacuation App
-Main application entry point with dual-role interface.
+LumiLink — Emergency Safety & Guidance App
+Main application entry point with single-role interface.
 
 Run: python app.py
 """
@@ -8,22 +8,24 @@ Run: python app.py
 import customtkinter as ctk
 import threading
 import time
+import os
+import importlib.util
 
 # Configure appearance
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
 
 from utils.theme import *
-from utils.simulator import SensorSimulator, SOSSimulator, EvacSimulator, ResponderSimulator
+from utils.simulator import SensorSimulator, SOSSimulator, GuideSimulator
 from utils.fire_model import FireDetectionModel
 
 
-class FireflyApp(ctk.CTk):
+class LumiLinkApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
         # ── Window Setup ──
-        self.title("Firefly — Emergency Safety System")
+        self.title("LumiLink — Emergency Safety System")
         self.geometry("1000x700")
         self.minsize(900, 650)
         self.configure(fg_color=BG_PRIMARY)
@@ -31,8 +33,7 @@ class FireflyApp(ctk.CTk):
         # ── Simulators ──
         self.sensor_sim = SensorSimulator()
         self.sos_sim = SOSSimulator()
-        self.evac_sim = EvacSimulator()
-        self.responder_sim = ResponderSimulator()
+        self.guide_sim = GuideSimulator()
 
         # ── Screen management ──
         self.screens = {}
@@ -46,17 +47,40 @@ class FireflyApp(ctk.CTk):
         # ML model for prediction
         self.fire_model = FireDetectionModel()
 
-        # Runtime state used by screens and auto-evac logic.
+        # Runtime state used by screens and auto-guide logic.
         self.current_risk = "CLEAR"
         self.current_hazard_level = "green"
         self.current_hazard_type = "none"
         self.current_sensor_source = "simulator"
-        self.auto_evac_cooldown_s = 8.0
-        self._last_auto_evac_ts = 0.0
-        self._auto_evac_armed = True
+        self.auto_guide_cooldown_s = 8.0
+        self._last_auto_guide_ts = 0.0
+        self._auto_guide_armed = True
+        self.space_hold_active = False
+
+        # Floor-map planner state (used as route fallback before simulator).
+        self._path_calc = None
+        self._planner_grid = None
+        self._planner_path = None
+        self._planner_step_idx = 0
+        self._planner_last_step_ts = 0.0
+        self._planner_cell_size_m = float(os.getenv("FIREFLY_CELL_SIZE_M", "1.2"))
+        self._planner_start = self._parse_cell_env("FIREFLY_START_CELL", (20, 20))
+        self._planner_goal = self._parse_cell_env("FIREFLY_EXIT_CELL", (70, 70))
+        self._planner_target_exit = os.getenv("FIREFLY_EXIT_NAME", "Exit A")
+        self._planner_enabled = self._init_floor_planner()
+
+        # Hold SPACE to temporarily mask live readings and direction.
+        self.bind_all("<KeyPress-space>", self._on_space_press)
+        self.bind_all("<KeyRelease-space>", self._on_space_release)
 
         # Show splash first
         self._show_splash()
+
+    def _on_space_press(self, _event=None):
+        self.space_hold_active = True
+
+    def _on_space_release(self, _event=None):
+        self.space_hold_active = False
 
     def get_live_sensor_data(self):
         """Return LiFi/Arduino data when fresh; otherwise fallback to simulator."""
@@ -92,7 +116,7 @@ class FireflyApp(ctk.CTk):
         }
 
     def get_live_route_data(self):
-        """Return LiFi route direction data when available; fallback to evac simulator."""
+        """Return LiFi route direction data when available; fallback to guide simulator."""
         dash = self.screens.get("dashboard") if hasattr(self, "screens") else None
         if dash and hasattr(dash, "sensor_reader"):
             route = dash.sensor_reader.get_latest_route()
@@ -109,14 +133,170 @@ class FireflyApp(ctk.CTk):
                     "ttl_s": ttl_s,
                 }
 
+        # Use floor-map planner route when LiFi route packets are unavailable.
+        planned = self.get_planned_route_data()
+        if planned is not None:
+            return planned
+
         return {
             "next_turn": "SIM",
-            "distance_m": float(self.evac_sim.distance_to_exit),
+            "distance_m": float(self.guide_sim.distance_to_exit),
             "target_exit": "Exit B",
             "hazard": (self.sensor_sim.get_snapshot().get("active_hazard") or "none"),
             "source": "simulator",
             "age_sec": None,
             "ttl_s": None,
+        }
+
+    @staticmethod
+    def _parse_cell_env(env_key, default):
+        raw = os.getenv(env_key)
+        if not raw:
+            return default
+        try:
+            x_str, y_str = raw.split(",", 1)
+            return int(x_str.strip()), int(y_str.strip())
+        except Exception:
+            return default
+
+    def _init_floor_planner(self):
+        try:
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            repo_root = os.path.normpath(os.path.join(app_dir, ".."))
+            planner_file = os.path.join(repo_root, "path_algorithm", "path_calculation.py")
+
+            spec = importlib.util.spec_from_file_location("firefly_path_calculation", planner_file)
+            if not spec or not spec.loader:
+                return False
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            self._path_calc = module
+
+            map_path = os.getenv("FIREFLY_FLOOR_MAP")
+            if not map_path:
+                map_path = os.path.join(repo_root, "path_algorithm", "floor_map_1.png")
+
+            grid = self._path_calc.image_to_grid(map_path)
+            self._planner_grid = grid
+            rows = len(grid)
+            cols = len(grid[0])
+            self._planner_start = self._clamp_to_free_cell(self._planner_start, rows, cols)
+            self._planner_goal = self._clamp_to_free_cell(self._planner_goal, rows, cols)
+            return True
+        except Exception as err:
+            print(f"[RoutePlanner] Disabled: {err}")
+            return False
+
+    def _clamp_to_free_cell(self, cell, rows, cols):
+        if self._planner_grid is None:
+            return cell
+
+        x = max(0, min(rows - 1, int(cell[0])))
+        y = max(0, min(cols - 1, int(cell[1])))
+        if self._planner_grid[x][y] == 0:
+            return (x, y)
+
+        radius = 1
+        while radius < max(rows, cols):
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < rows and 0 <= ny < cols and self._planner_grid[nx][ny] == 0:
+                        return (nx, ny)
+            radius += 1
+        return (x, y)
+
+    def _compute_or_refresh_planner_path(self):
+        if not self._planner_enabled or not self._planner_grid or not self._path_calc:
+            return False
+
+        start = self._planner_start
+        if self._planner_path and self._planner_step_idx < len(self._planner_path):
+            start = self._planner_path[self._planner_step_idx]
+
+        start = self._clamp_to_free_cell(start, len(self._planner_grid), len(self._planner_grid[0]))
+        goal = self._clamp_to_free_cell(self._planner_goal, len(self._planner_grid), len(self._planner_grid[0]))
+
+        path = self._path_calc.astar(self._planner_grid, start, goal)
+        if not path or len(path) < 2:
+            return False
+
+        self._planner_path = path
+        self._planner_step_idx = 0
+        self._planner_last_step_ts = time.time()
+        return True
+
+    @staticmethod
+    def _delta_to_turn(curr, nxt):
+        dx = nxt[0] - curr[0]
+        dy = nxt[1] - curr[1]
+        if dx == 0 and dy > 0:
+            return "RIGHT"
+        if dx == 0 and dy < 0:
+            return "LEFT"
+        if dx < 0 and dy == 0:
+            return "FORWARD"
+        if dx > 0 and dy == 0:
+            return "BACK"
+        if dx < 0 and dy > 0:
+            return "FORWARD_RIGHT"
+        if dx < 0 and dy < 0:
+            return "FORWARD_LEFT"
+        if dx > 0 and dy > 0:
+            return "RIGHT"
+        if dx > 0 and dy < 0:
+            return "LEFT"
+        return "FORWARD"
+
+    def get_planned_route_data(self):
+        # Planner route is only relevant in active emergency/guide conditions.
+        if self.current_hazard_level != "red":
+            return None
+
+        if not self._planner_enabled:
+            return None
+
+        if not self._planner_path or self._planner_step_idx >= len(self._planner_path) - 1:
+            if not self._compute_or_refresh_planner_path():
+                return None
+
+        now = time.time()
+        if now - self._planner_last_step_ts >= 1.0 and self._planner_step_idx < len(self._planner_path) - 2:
+            self._planner_step_idx += 1
+            self._planner_last_step_ts = now
+
+        curr = self._planner_path[self._planner_step_idx]
+        nxt = self._planner_path[min(self._planner_step_idx + 1, len(self._planner_path) - 1)]
+        remaining_steps = max(0, (len(self._planner_path) - 1) - self._planner_step_idx)
+        distance_m = remaining_steps * self._planner_cell_size_m
+
+        return {
+            "next_turn": self._delta_to_turn(curr, nxt),
+            "distance_m": float(distance_m),
+            "target_exit": self._planner_target_exit,
+            "hazard": self.current_hazard_type,
+            "source": "floor_map",
+            "age_sec": 0.0,
+            "ttl_s": 1.2,
+        }
+
+    def get_planner_visual_data(self):
+        if not self._planner_enabled or not self._planner_grid or not self._planner_path:
+            return None
+
+        rows = len(self._planner_grid)
+        cols = len(self._planner_grid[0]) if rows else 0
+        if rows == 0 or cols == 0:
+            return None
+
+        return {
+            "rows": rows,
+            "cols": cols,
+            "grid": self._planner_grid,
+            "path": list(self._planner_path),
+            "step_idx": int(self._planner_step_idx),
+            "start": self._planner_start,
+            "goal": self._planner_goal,
         }
 
     def _risk_to_level(self, risk):
@@ -135,11 +315,11 @@ class FireflyApp(ctk.CTk):
             return "fire"
         return "none"
 
-    def _maybe_auto_start_evac(self, risk):
-        """Auto-enter evacuation mode only when ML reports DANGER."""
+    def _maybe_auto_start_guide(self, risk):
+        """Auto-enter guidance mode only when ML reports DANGER."""
         upper_risk = (risk or "").upper()
         if upper_risk == "CLEAR":
-            self._auto_evac_armed = True
+            self._auto_guide_armed = True
             return
 
         if upper_risk != "DANGER":
@@ -148,16 +328,16 @@ class FireflyApp(ctk.CTk):
         if self.current_role != "need_help":
             return
 
-        if self.current_screen_name in {"evac", "sos", "role_select"}:
+        if self.current_screen_name in {"guide", "sos", "role_select"}:
             return
 
         now = time.time()
-        if (not self._auto_evac_armed) or (now - self._last_auto_evac_ts < self.auto_evac_cooldown_s):
+        if (not self._auto_guide_armed) or (now - self._last_auto_guide_ts < self.auto_guide_cooldown_s):
             return
 
-        self._last_auto_evac_ts = now
-        self._auto_evac_armed = False
-        self.show_screen("evac")
+        self._last_auto_guide_ts = now
+        self._auto_guide_armed = False
+        self.show_screen("guide")
 
     # ────────────────────────── Splash Screen ──────────────────────────
 
@@ -169,7 +349,7 @@ class FireflyApp(ctk.CTk):
         center.place(relx=0.5, rely=0.5, anchor="center")
 
         ctk.CTkLabel(center, text="🛡", font=(FONT_FAMILY, 72)).pack()
-        ctk.CTkLabel(center, text="Firefly", font=FONT_HERO,
+        ctk.CTkLabel(center, text="LumiLink", font=FONT_HERO,
                      text_color=ACCENT_CYAN).pack(pady=(PAD_MD, PAD_XS))
         ctk.CTkLabel(center, text="Emergency Safety System",
                      font=FONT_BODY, text_color=TEXT_MUTED).pack()
@@ -217,20 +397,18 @@ class FireflyApp(ctk.CTk):
 
         # Import screens
         from screens.dashboard import DashboardScreen
-        from screens.evac_mode import EvacScreen
+        from screens.evac_mode import GuideScreen
         from screens.sos_flow import SOSScreen
         from screens.environment import EnvironmentScreen
         from screens.settings import SettingsScreen
-        from screens.responder import ResponderScreen
 
         # Create all screens
         self.screens["role_select"] = self._create_role_select()
         self.screens["dashboard"] = DashboardScreen(self.container, self)
-        self.screens["evac"] = EvacScreen(self.container, self)
+        self.screens["guide"] = GuideScreen(self.container, self)
         self.screens["sos"] = SOSScreen(self.container, self)
         self.screens["environment"] = EnvironmentScreen(self.container, self)
         self.screens["settings"] = SettingsScreen(self.container, self)
-        self.screens["responder"] = ResponderScreen(self.container, self)
 
         # Place all (hidden)
         for screen in self.screens.values():
@@ -257,15 +435,15 @@ class FireflyApp(ctk.CTk):
 
         # Logo
         ctk.CTkLabel(center, text="🛡", font=(FONT_FAMILY, 56)).pack()
-        ctk.CTkLabel(center, text="Firefly", font=FONT_HERO,
+        ctk.CTkLabel(center, text="LumiLink", font=FONT_HERO,
                      text_color=ACCENT_CYAN).pack(pady=(PAD_SM, PAD_XS))
-        ctk.CTkLabel(center, text="Choose how you want to use Firefly",
+        ctk.CTkLabel(center, text="Emergency guidance mode",
                      font=FONT_BODY, text_color=TEXT_MUTED).pack(pady=(0, PAD_XL))
 
-        # Two role cards side by side
+        # Single role card
         cards = ctk.CTkFrame(center, fg_color="transparent")
         cards.pack()
-        cards.columnconfigure((0, 1), weight=1)
+        cards.columnconfigure(0, weight=1)
 
         # ── I NEED HELP ──
         need_help_card = ctk.CTkFrame(cards, fg_color=BG_CARD, corner_radius=CORNER_RADIUS_LG,
@@ -279,7 +457,7 @@ class FireflyApp(ctk.CTk):
         ctk.CTkLabel(nh_inner, text="🆘", font=(FONT_FAMILY, 64)).pack()
         ctk.CTkLabel(nh_inner, text="I NEED HELP", font=FONT_TITLE,
                      text_color=ROLE_NEED_HELP).pack(pady=(PAD_MD, PAD_SM))
-        ctk.CTkLabel(nh_inner, text="Get real-time threat alerts,\nevacuation guidance,\nand emergency SOS",
+        ctk.CTkLabel(nh_inner, text="Get real-time threat alerts,\nlive route guidance,\nand emergency SOS",
                      font=FONT_BODY, text_color=TEXT_SECONDARY, justify="center").pack(pady=(0, PAD_LG))
 
         need_btn = ctk.CTkButton(nh_inner, text="Enter →", width=200, height=48,
@@ -288,39 +466,11 @@ class FireflyApp(ctk.CTk):
                                  command=lambda: self._select_role("need_help"))
         need_btn.pack()
 
-        # ── I WANT TO HELP ──
-        help_card = ctk.CTkFrame(cards, fg_color=BG_CARD, corner_radius=CORNER_RADIUS_LG,
-                                 border_width=2, border_color=ROLE_HELP_OTHERS, width=320, height=350)
-        help_card.grid(row=0, column=1, padx=PAD_LG, sticky="nsew")
-        help_card.grid_propagate(False)
-
-        ho_inner = ctk.CTkFrame(help_card, fg_color="transparent")
-        ho_inner.place(relx=0.5, rely=0.5, anchor="center")
-
-        ctk.CTkLabel(ho_inner, text="🦸", font=(FONT_FAMILY, 64)).pack()
-        ctk.CTkLabel(ho_inner, text="I WANT TO HELP", font=FONT_TITLE,
-                     text_color=ROLE_HELP_OTHERS).pack(pady=(PAD_MD, PAD_SM))
-        ctk.CTkLabel(ho_inner, text="See people nearby who\nneed assistance and\nguide them to safety",
-                     font=FONT_BODY, text_color=TEXT_SECONDARY, justify="center").pack(pady=(0, PAD_LG))
-
-        help_btn = ctk.CTkButton(ho_inner, text="Enter →", width=200, height=48,
-                                 fg_color=ROLE_HELP_OTHERS, hover_color=ROLE_HELP_OTHERS_HOVER,
-                                 font=FONT_HEADING, corner_radius=CORNER_RADIUS,
-                                 command=lambda: self._select_role("help_others"))
-        help_btn.pack()
-
-        # Version text at bottom
-        ctk.CTkLabel(center, text="Firefly v1.0 — Prototype", font=FONT_TINY,
-                     text_color=TEXT_MUTED).pack(pady=(PAD_XL, 0))
-
         return frame
 
     def _select_role(self, role):
         self.current_role = role
-        if role == "need_help":
-            self.show_screen("dashboard")
-        else:
-            self.show_screen("responder")
+        self.show_screen("dashboard")
 
     # ────────────────────────── Navigation ──────────────────────────
 
@@ -343,6 +493,18 @@ class FireflyApp(ctk.CTk):
     # ────────────────────────── Update Loop ──────────────────────────
 
     def _update_loop(self):
+        # During space-hold mode, keep UI responsive but pause model/update progression.
+        if self.space_hold_active:
+            if self.current_screen_name and self.current_screen_name in self.screens:
+                screen = self.screens[self.current_screen_name]
+                if hasattr(screen, "refresh"):
+                    try:
+                        screen.refresh()
+                    except Exception:
+                        pass
+            self.after(1000, self._update_loop)
+            return
+
         # Get latest sensor values (LiFi/Arduino preferred, simulator fallback).
         sensor_data = self.get_live_sensor_data()
 
@@ -373,7 +535,7 @@ class FireflyApp(ctk.CTk):
         self.sensor_sim.hazard_level = self.current_hazard_level
         self.sensor_sim.active_hazard = None if self.current_hazard_level != "red" else self.current_hazard_type
 
-        self._maybe_auto_start_evac(risk)
+        self._maybe_auto_start_guide(risk)
 
         # Refresh screen
         if self.current_screen_name and self.current_screen_name in self.screens:
@@ -391,8 +553,7 @@ class FireflyApp(ctk.CTk):
 
     def on_closing(self):
         self.sensor_sim.stop()
-        self.evac_sim.stop()
-        self.responder_sim.stop()
+        self.guide_sim.stop()
         
         # Stop Arduino reader if instance exists (usually attached to dashboard)
         if "dashboard" in self.screens:
@@ -404,6 +565,6 @@ class FireflyApp(ctk.CTk):
 
 
 if __name__ == "__main__":
-    app = FireflyApp()
+    app = LumiLinkApp()
     app.protocol("WM_DELETE_WINDOW", app.on_closing)
     app.mainloop()

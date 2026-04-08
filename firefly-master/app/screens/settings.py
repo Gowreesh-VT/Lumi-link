@@ -135,13 +135,6 @@ class SettingsScreen(ctk.CTkFrame):
                                  font=FONT_SMALL, corner_radius=CORNER_RADIUS_SM)
         pair_btn.pack(anchor="w", pady=(PAD_SM, 0))
 
-        # ── Role switch ──
-        switch_btn = ctk.CTkButton(body, text="← Switch Role", height=36,
-                                   fg_color="transparent", hover_color=BG_CARD,
-                                   text_color=TEXT_MUTED, font=FONT_SMALL,
-                                   command=lambda: self.app.show_screen("role_select"))
-        switch_btn.pack(pady=(PAD_SM, PAD_LG))
-
     def _render_contacts(self):
         for widget in self.contacts_inner.winfo_children():
             widget.destroy()
