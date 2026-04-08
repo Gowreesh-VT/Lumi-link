@@ -1,46 +1,44 @@
 """
 Theme constants and style helpers for the Emergency Safety App.
-Dark theme with status-based color coding.
+Midnight teal theme with amber highlights and status-based color coding.
 """
 
 # ──────────────────────────── Color Palette ────────────────────────────
 
-# Base dark theme
-BG_PRIMARY = "#0D1117"
-BG_SECONDARY = "#161B22"
-BG_CARD = "#1C2333"
-BG_INPUT = "#21262D"
-BORDER = "#30363D"
+# Base dark theme (teal slate)
+BG_PRIMARY = "#081418"
+BG_SECONDARY = "#0F2026"
+BG_CARD = "#142A31"
+BG_INPUT = "#1A353D"
+BORDER = "#2D4D57"
 
 # Text
-TEXT_PRIMARY = "#F0F6FC"
-TEXT_SECONDARY = "#8B949E"
-TEXT_MUTED = "#6E7681"
+TEXT_PRIMARY = "#EAF7F8"
+TEXT_SECONDARY = "#A7C2C8"
+TEXT_MUTED = "#7EA0A8"
 
 # Accent
-ACCENT_BLUE = "#58A6FF"
-ACCENT_PURPLE = "#BC8CFF"
-ACCENT_CYAN = "#39D2C0"
+ACCENT_BLUE = "#4DA3FF"
+ACCENT_PURPLE = "#FFB86B"
+ACCENT_CYAN = "#2FD4BE"
 
 # Status
-STATUS_GREEN = "#2EA043"
-STATUS_GREEN_BG = "#0D2818"
-STATUS_AMBER = "#D29922"
-STATUS_AMBER_BG = "#2D2206"
-STATUS_RED = "#F85149"
-STATUS_RED_BG = "#3D1114"
+STATUS_GREEN = "#3CCF7A"
+STATUS_GREEN_BG = "#103423"
+STATUS_AMBER = "#FFB347"
+STATUS_AMBER_BG = "#3A2A12"
+STATUS_RED = "#FF5E5B"
+STATUS_RED_BG = "#421A1E"
 
 # Hazard type colors
-FIRE_COLOR = "#FF6B35"
-GAS_COLOR = "#9BE564"
-EARTHQUAKE_COLOR = "#D4915E"
-CHEMICAL_COLOR = "#A855F7"
+FIRE_COLOR = "#FF7A45"
+GAS_COLOR = "#8BEA8A"
+EARTHQUAKE_COLOR = "#D6A26B"
+CHEMICAL_COLOR = "#6BA3FF"
 
 # Role selection
-ROLE_NEED_HELP = "#EF4444"
-ROLE_NEED_HELP_HOVER = "#DC2626"
-ROLE_HELP_OTHERS = "#22C55E"
-ROLE_HELP_OTHERS_HOVER = "#16A34A"
+ROLE_NEED_HELP = "#FF6A5F"
+ROLE_NEED_HELP_HOVER = "#E6554B"
 
 # ──────────────────────────── Fonts ────────────────────────────
 
@@ -93,7 +91,7 @@ STATUS_CONFIG = {
         "bg": STATUS_RED_BG,
         "label": "DANGER",
         "icon": "✕",
-        "description": "Immediate threat! Follow evacuation instructions."
+        "description": "Immediate threat! Follow safety guidance."
     }
 }
 
@@ -111,14 +109,14 @@ HAZARD_INFO = {
         "icon": "☁",
         "title": "GAS LEAK",
         "instruction": "Do NOT use switches. Cover face. Move upwind.",
-        "action": "Evacuate to open area immediately"
+        "action": "Move to open area immediately"
     },
     "earthquake": {
         "color": EARTHQUAKE_COLOR,
         "icon": "🌍",
         "title": "EARTHQUAKE",
         "instruction": "Drop, Cover, Hold. Stay away from windows.",
-        "action": "Wait for shaking to stop, then evacuate"
+        "action": "Wait for shaking to stop, then move to a safe exit"
     },
     "chemical": {
         "color": CHEMICAL_COLOR,

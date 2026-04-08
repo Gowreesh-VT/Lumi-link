@@ -1,5 +1,5 @@
 """
-Simulator for mock sensor data, hazard events, and responder data.
+Simulator for mock sensor data, hazard events, SOS flow, and route guidance.
 Provides realistic-looking data for the GUI prototype.
 """
 
@@ -183,8 +183,8 @@ class SOSSimulator:
         self.responder_distance = None
 
 
-class EvacSimulator:
-    """Simulates evacuation routing data."""
+class GuideSimulator:
+    """Simulates guidance routing data."""
 
     DIRECTIONS = ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"]
 
@@ -225,61 +225,3 @@ class EvacSimulator:
         self.is_running = False
 
 
-class ResponderSimulator:
-    """Simulates data for the 'Help Others' responder role."""
-
-    def __init__(self):
-        self.alerts = []
-        self.is_running = False
-        self._generate_initial_alerts()
-
-    def _generate_initial_alerts(self):
-        names = ["Aarav M.", "Priya S.", "Rahul K.", "Sneha D.", "Vikram T."]
-        hazards = ["fire", "gas", "earthquake", "chemical"]
-        floors = ["Ground Floor", "1st Floor", "2nd Floor", "3rd Floor", "Basement"]
-        statuses = ["critical", "moderate", "stable"]
-
-        for i in range(3):
-            self.alerts.append({
-                "id": i + 1,
-                "name": names[i],
-                "hazard": random.choice(hazards),
-                "floor": random.choice(floors),
-                "distance": round(random.uniform(0.3, 3.0), 1),
-                "status": random.choice(statuses),
-                "time_ago": f"{random.randint(1, 10)} min ago",
-                "medical_flags": random.choice(["None", "Asthma", "Wheelchair", "Heart condition"]),
-            })
-
-    def start(self, callback=None):
-        self.is_running = True
-
-        def _simulate():
-            names = ["Anita R.", "Deepak V.", "Fatima Z.", "Govind P.", "Harsha N."]
-            hazards = ["fire", "gas", "earthquake", "chemical"]
-            floors = ["Ground Floor", "1st Floor", "2nd Floor", "3rd Floor", "Basement"]
-            while self.is_running:
-                time.sleep(random.randint(5, 15))
-                if len(self.alerts) < 10:
-                    new_alert = {
-                        "id": len(self.alerts) + 1,
-                        "name": random.choice(names),
-                        "hazard": random.choice(hazards),
-                        "floor": random.choice(floors),
-                        "distance": round(random.uniform(0.2, 4.0), 1),
-                        "status": random.choice(["critical", "moderate"]),
-                        "time_ago": "Just now",
-                        "medical_flags": random.choice(["None", "Asthma", "Wheelchair", "Heart condition"]),
-                    }
-                    self.alerts.insert(0, new_alert)
-                    if callback:
-                        callback()
-
-        t = threading.Thread(target=_simulate, daemon=True)
-        t.start()
-
-    def stop(self):
-        self.is_running = False
-
-    def resolve_alert(self, alert_id):
-        self.alerts = [a for a in self.alerts if a["id"] != alert_id]

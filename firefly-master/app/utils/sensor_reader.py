@@ -122,6 +122,7 @@ class ArduinoSensorReader:
                 except Exception as e:
                     self.is_connected = False
                     self.last_error = str(e)
+                    print(f"[Arduino] Connect failed on {port}: {e}")
                     time.sleep(1.5)
                     continue
 
