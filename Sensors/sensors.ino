@@ -5,17 +5,26 @@
 
 #define SMOKE_PIN A0
 #define GAS_PIN A1
-#define SHOCK_PIN 3
-#define MOTION_PIN 4
+#define LIFI_LED_PIN 8
+#define HEARTBEAT_ON_MS 80
+#define HEARTBEAT_OFF_MS 80
+#define LOOP_DELAY_MS 500
 
 DHT dht(DHTPIN, DHTTYPE);
+int seqNo = 0;
+
+void blinkHeartbeat() {
+  digitalWrite(LIFI_LED_PIN, HIGH);
+  delay(HEARTBEAT_ON_MS);
+  digitalWrite(LIFI_LED_PIN, LOW);
+  delay(HEARTBEAT_OFF_MS);
+}
 
 void setup() {
-  Serial.begin(9600);
-  
-  pinMode(SHOCK_PIN, INPUT);
-  pinMode(MOTION_PIN, INPUT);
-  
+  Serial.begin(115200);
+  pinMode(LIFI_LED_PIN, OUTPUT);
+  digitalWrite(LIFI_LED_PIN, LOW);
+
   dht.begin();
 }
 
@@ -28,36 +37,49 @@ void loop() {
   float temperature = dht.readTemperature();
   float humidity = dht.readHumidity();
 
-  int shockState = digitalRead(SHOCK_PIN);
-  int motionState = digitalRead(MOTION_PIN);
 
-  // Create JSON manually
-  Serial.print("{");
+  int shockState = 0;
+  int motionState = 0;
+  seqNo++;
 
-  Serial.print("\"smoke\":");
-  Serial.print(smokeValue);
-  Serial.print(",");
+  // Create JSON payload used by Firefly sensor parser.
+  String jsonPayload = "{";
 
-  Serial.print("\"gas\":");
-  Serial.print(gasValue);
-  Serial.print(",");
+  jsonPayload += "\"type\":\"sensor\",";
+  jsonPayload += "\"node\":\"UNO-01\",";
+  jsonPayload += "\"seq\":";
+  jsonPayload += seqNo;
+  jsonPayload += ",";
 
-  Serial.print("\"temperature\":");
-  Serial.print(temperature);
-  Serial.print(",");
+  jsonPayload += "\"smoke\":";
+  jsonPayload += smokeValue;
+  jsonPayload += ",";
 
-  Serial.print("\"humidity\":");
-  Serial.print(humidity);
-  Serial.print(",");
+  jsonPayload += "\"gas\":";
+  jsonPayload += gasValue;
+  jsonPayload += ",";
 
-  Serial.print("\"shock\":");
-  Serial.print(shockState);
-  Serial.print(",");
+  jsonPayload += "\"temperature\":";
+  jsonPayload += String(temperature, 1);
+  jsonPayload += ",";
 
-  Serial.print("\"motion\":");
-  Serial.print(motionState);
+  jsonPayload += "\"humidity\":";
+  jsonPayload += String(humidity, 1);
+  jsonPayload += ",";
 
-  Serial.println("}");
+  jsonPayload += "\"shock\":";
+  jsonPayload += shockState;
+  jsonPayload += ",";
 
-  delay(2000);
+  jsonPayload += "\"motion\":";
+  jsonPayload += motionState;
+  jsonPayload += "}";
+
+  // Direct mode: send plain JSON over USB serial to Firefly.
+  Serial.println(jsonPayload);
+
+  // Keep LED activity visible without using optical receiver decode.
+  blinkHeartbeat();
+
+  delay(LOOP_DELAY_MS);
 }
