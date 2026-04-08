@@ -14,9 +14,6 @@ class DashboardScreen(ctk.CTkFrame):
         self.app = app
         self.sim = app.sensor_sim
         self.sensor_reader = ArduinoSensorReader(port=None)
-        self.sensor_reader.on_fire_alert = lambda: self._trigger_test("fire")
-        self.sensor_reader.on_gas_alert = lambda: self._trigger_test("gas")
-        self.sensor_reader.on_shock_alert = lambda: self._trigger_test("earthquake")
         self._build_ui()
 
     def _build_ui(self):
@@ -174,8 +171,9 @@ class DashboardScreen(ctk.CTkFrame):
         """Called by the app's update loop to refresh UI."""
         data = self.sim.get_snapshot()
 
-        # Update banner
-        status_cfg = STATUS_CONFIG.get(data["hazard_level"], STATUS_CONFIG["green"])
+        # Update banner from ML-driven app state.
+        hazard_level = getattr(self.app, "current_hazard_level", data.get("hazard_level", "green"))
+        status_cfg = STATUS_CONFIG.get(hazard_level, STATUS_CONFIG["green"])
         self.banner_frame.configure(fg_color=status_cfg["bg"], border_width=2, border_color=status_cfg["color"])
         self.banner_icon.configure(text=status_cfg["icon"], text_color=status_cfg["color"])
         self.banner_title.configure(text=status_cfg["label"], text_color=status_cfg["color"])
@@ -207,21 +205,26 @@ class DashboardScreen(ctk.CTkFrame):
         # Update connectivity label in header using Arduino connection status
         conn = ard_data["connected"]
         source = (ard_data.get("source") or "serial").upper()
-        conn_text = f"● {source} Connected" if conn else "● Sensor Offline"
-        conn_lbl_color = STATUS_GREEN if conn else STATUS_RED
+        age = ard_data.get("age_sec")
+        is_stale = bool(conn and age is not None and age > 3)
+        if not conn:
+            conn_text = "● Sensor Offline (SIM Fallback)"
+            conn_lbl_color = STATUS_RED
+        elif is_stale:
+            conn_text = f"● {source} Stale ({age:.1f}s) - SIM Fallback"
+            conn_lbl_color = STATUS_AMBER
+        else:
+            conn_text = f"● {source} Live"
+            conn_lbl_color = STATUS_GREEN
         self.connectivity_label.configure(text=conn_text, text_color=conn_lbl_color)
 
         # Fallback from live stream to simulator values if feed is stale/disconnected.
-        if (not conn) or (ard_data.get("age_sec") and ard_data.get("age_sec", 0) > 3):
+        if (not conn) or is_stale:
             sim = self.sim.get_data()
             self.signal_widgets["temperature"].configure(text=f"{sim['temperature']:.1f}°C")
             self.signal_widgets["humidity"].configure(text=f"{sim['humidity']:.1f}%")
             self.signal_widgets["smoke"].configure(text=f"{sim['smoke']}")
             self.signal_widgets["gas"].configure(text=f"{sim['gas']}")
-
-        # Auto-trigger EVAC mode on red
-        if data["hazard_level"] == "red" and self.app.current_screen_name == "dashboard":
-            self.app.show_screen("evac")
 
     def on_enter(self):
         if hasattr(self, "sensor_reader") and not self.sensor_reader.is_running:

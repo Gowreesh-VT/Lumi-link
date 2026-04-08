@@ -46,6 +46,15 @@ class FireflyApp(ctk.CTk):
         # ML model for prediction
         self.fire_model = FireDetectionModel()
 
+        # Runtime state used by screens and auto-evac logic.
+        self.current_risk = "CLEAR"
+        self.current_hazard_level = "green"
+        self.current_hazard_type = "none"
+        self.current_sensor_source = "simulator"
+        self.auto_evac_cooldown_s = 8.0
+        self._last_auto_evac_ts = 0.0
+        self._auto_evac_armed = True
+
         # Show splash first
         self._show_splash()
 
@@ -64,6 +73,8 @@ class FireflyApp(ctk.CTk):
                     "shock": live.get("shock", 0),
                     "motion": live.get("motion", 0),
                     "source": live.get("source", "serial"),
+                    "age_sec": live.get("age_sec"),
+                    "connected": True,
                 }
 
         # Fallback to simulator stream.
@@ -76,6 +87,8 @@ class FireflyApp(ctk.CTk):
             "shock": sim.get("shock", 0),
             "motion": sim.get("motion", 0),
             "source": "simulator",
+            "age_sec": None,
+            "connected": False,
         }
 
     def get_live_route_data(self):
@@ -92,6 +105,8 @@ class FireflyApp(ctk.CTk):
                     "target_exit": route.get("target_exit", "Exit A"),
                     "hazard": route.get("hazard", "none"),
                     "source": route.get("source", "lifi"),
+                    "age_sec": age,
+                    "ttl_s": ttl_s,
                 }
 
         return {
@@ -100,7 +115,49 @@ class FireflyApp(ctk.CTk):
             "target_exit": "Exit B",
             "hazard": (self.sensor_sim.get_snapshot().get("active_hazard") or "none"),
             "source": "simulator",
+            "age_sec": None,
+            "ttl_s": None,
         }
+
+    def _risk_to_level(self, risk):
+        return {
+            "CLEAR": "green",
+            "WARNING": "amber",
+            "DANGER": "red",
+        }.get((risk or "").upper(), "green")
+
+    def _infer_hazard_type(self, smoke, gas, shock):
+        if shock == 1:
+            return "earthquake"
+        if gas > smoke:
+            return "gas"
+        if smoke > 0 or gas > 0:
+            return "fire"
+        return "none"
+
+    def _maybe_auto_start_evac(self, risk):
+        """Auto-enter evacuation mode only when ML reports DANGER."""
+        upper_risk = (risk or "").upper()
+        if upper_risk == "CLEAR":
+            self._auto_evac_armed = True
+            return
+
+        if upper_risk != "DANGER":
+            return
+
+        if self.current_role != "need_help":
+            return
+
+        if self.current_screen_name in {"evac", "sos", "role_select"}:
+            return
+
+        now = time.time()
+        if (not self._auto_evac_armed) or (now - self._last_auto_evac_ts < self.auto_evac_cooldown_s):
+            return
+
+        self._last_auto_evac_ts = now
+        self._auto_evac_armed = False
+        self.show_screen("evac")
 
     # ────────────────────────── Splash Screen ──────────────────────────
 
@@ -308,6 +365,15 @@ class FireflyApp(ctk.CTk):
 
         # Store result globally
         self.current_risk = risk
+        self.current_hazard_level = self._risk_to_level(risk)
+        self.current_hazard_type = self._infer_hazard_type(smoke, gas, shock)
+        self.current_sensor_source = sensor_data.get("source", "simulator")
+
+        # Keep simulator hazard metadata in sync so existing screens remain coherent.
+        self.sensor_sim.hazard_level = self.current_hazard_level
+        self.sensor_sim.active_hazard = None if self.current_hazard_level != "red" else self.current_hazard_type
+
+        self._maybe_auto_start_evac(risk)
 
         # Refresh screen
         if self.current_screen_name and self.current_screen_name in self.screens:

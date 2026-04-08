@@ -162,10 +162,14 @@ class EvacScreen(ctk.CTkFrame):
             turn = str(route.get("next_turn", "FORWARD")).upper()
             arrow = self.TURN_TO_ARROW.get(turn, "↑")
             self.direction_arrow.configure(text=arrow)
-            self.route_status_label.configure(text=f"LiFi route: {turn}")
+            age = route.get("age_sec")
+            if age is not None:
+                self.route_status_label.configure(text=f"LiFi route: {turn} ({age:.1f}s)")
+            else:
+                self.route_status_label.configure(text=f"LiFi route: {turn}")
         else:
             self.direction_arrow.configure(text=self.evac_sim.current_direction)
-            self.route_status_label.configure(text=self.evac_sim.route_status)
+            self.route_status_label.configure(text="SIM route fallback")
 
         # Update distance & time
         dist = int(route.get("distance_m", 0)) if using_live_route else self.evac_sim.distance_to_exit

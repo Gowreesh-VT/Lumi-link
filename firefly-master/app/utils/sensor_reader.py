@@ -41,6 +41,7 @@ class ArduinoSensorReader:
         self.route_seq = 0
         self.route_ttl_ms = 2500
         self.route_last_update_ts = 0.0
+        self.route_out_of_order_drops = 0
         
         # Threat thresholds
         self.smoke_threshold = 700
@@ -225,12 +226,16 @@ class ArduinoSensorReader:
             print(f"[Arduino] JSON parsing error: {e}")
 
     def _parse_route_packet(self, data):
+        incoming_seq = int(data.get("seq", self.route_seq))
         with self._lock:
+            if self.route_last_update_ts and incoming_seq < self.route_seq:
+                self.route_out_of_order_drops += 1
+                return
             self.route_next_turn = data.get("next_turn", self.route_next_turn)
             self.route_distance_m = float(data.get("distance_m", self.route_distance_m))
             self.route_target_exit = data.get("target_exit", self.route_target_exit)
             self.route_hazard = data.get("hazard", self.route_hazard)
-            self.route_seq = int(data.get("seq", self.route_seq))
+            self.route_seq = incoming_seq
             self.route_ttl_ms = int(data.get("ttl_ms", self.route_ttl_ms))
             self.route_last_update_ts = time.time()
 
@@ -265,5 +270,6 @@ class ArduinoSensorReader:
                 "age_sec": age_sec,
                 "connected": self.is_connected,
                 "source": self.last_source,
+                "out_of_order_drops": self.route_out_of_order_drops,
             }
 
