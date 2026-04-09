@@ -99,7 +99,7 @@ To show different fire/location cases deterministically:
 2. Start with scenario variables:
 
 ```bash
-FIREFLY_SENSOR_PORT=/dev/cu.usbserial-1110 FIREFLY_START_CELL=10,15 FIREFLY_EXIT_CELL=70,70 /Users/gowreeshvt/Documents/GitHub/Light-Fidelity/.venv/bin/python /Users/gowreeshvt/Documents/GitHub/Light-Fidelity/firefly-master/app/app.py
+FIREFLY_SENSOR_PORT=/dev/cu.usbserial-11110 FIREFLY_START_CELL=10,15 FIREFLY_EXIT_CELL=70,70 /Users/gowreeshvt/Documents/GitHub/Light-Fidelity/.venv/bin/python /Users/gowreeshvt/Documents/GitHub/Light-Fidelity/firefly-master/app/app.py
 ```
 
 3. Repeat with different `FIREFLY_START_CELL`, for example:
