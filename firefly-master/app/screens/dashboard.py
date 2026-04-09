@@ -69,7 +69,7 @@ class DashboardScreen(ctk.CTkFrame):
 
         actions_frame = ctk.CTkFrame(body, fg_color="transparent")
         actions_frame.pack(fill="x", pady=(0, PAD_MD))
-        actions_frame.columnconfigure(0, weight=1)
+        actions_frame.columnconfigure((0, 1), weight=1)
 
         # Start guidance
         nav_btn = ctk.CTkButton(actions_frame, text="🧭\nGuide", height=90,
@@ -77,7 +77,15 @@ class DashboardScreen(ctk.CTkFrame):
                                 font=FONT_SUBHEADING, corner_radius=CORNER_RADIUS,
                                 border_width=1, border_color=BORDER,
                                 command=lambda: self.app.show_screen("guide"))
-        nav_btn.grid(row=0, column=0, sticky="nsew")
+        nav_btn.grid(row=0, column=0, padx=(0, PAD_SM), sticky="nsew")
+
+        sos_btn = ctk.CTkButton(actions_frame, text="🆘\nSOS", height=90,
+                    fg_color=STATUS_RED_BG, hover_color=STATUS_RED,
+                    font=FONT_SUBHEADING, corner_radius=CORNER_RADIUS,
+                    border_width=2, border_color=STATUS_RED,
+                    text_color=STATUS_RED,
+                    command=self._trigger_sos_danger)
+        sos_btn.grid(row=0, column=1, padx=(PAD_SM, 0), sticky="nsew")
 
         # ── Live Signals Strip ──
         signals_label = ctk.CTkLabel(body, text="LIVE SIGNALS", font=FONT_SMALL,
@@ -191,6 +199,12 @@ class DashboardScreen(ctk.CTkFrame):
     def on_enter(self):
         if hasattr(self, "sensor_reader") and not self.sensor_reader.is_running:
             self.sensor_reader.start()
+
+    def _trigger_sos_danger(self):
+        self.app.show_screen("sos")
+        sos_screen = self.app.screens.get("sos") if hasattr(self.app, "screens") else None
+        if sos_screen and hasattr(sos_screen, "trigger_sos_now"):
+            sos_screen.trigger_sos_now()
 
     def on_leave(self):
         pass

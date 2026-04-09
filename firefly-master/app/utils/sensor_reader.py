@@ -274,3 +274,20 @@ class ArduinoSensorReader:
                 "out_of_order_drops": self.route_out_of_order_drops,
             }
 
+    def send_command(self, command):
+        """Send a simple command line to Arduino, e.g. SOS_ON / SOS_OFF."""
+        if not command:
+            return False
+
+        conn = self.serial_conn
+        if conn is None or not conn.is_open:
+            return False
+
+        try:
+            payload = f"{command.strip()}\n".encode("utf-8")
+            conn.write(payload)
+            return True
+        except Exception as e:
+            self.last_error = str(e)
+            return False
+

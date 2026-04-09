@@ -52,6 +52,9 @@ class LumiLinkApp(ctk.CTk):
         self.current_hazard_level = "green"
         self.current_hazard_type = "none"
         self.current_sensor_source = "simulator"
+        self.manual_sos_mode = os.getenv("FIREFLY_MANUAL_SOS_MODE", "1") == "1"
+        self.manual_sos_active = False
+        self.auto_guide_enabled = os.getenv("FIREFLY_AUTO_GUIDE", "0") == "1"
         self.auto_guide_cooldown_s = 8.0
         self._last_auto_guide_ts = 0.0
         self._auto_guide_armed = True
@@ -339,6 +342,13 @@ class LumiLinkApp(ctk.CTk):
         self._auto_guide_armed = False
         self.show_screen("guide")
 
+    def trigger_manual_sos(self):
+        """Force the app into DANGER state for SOS demo flow."""
+        self.manual_sos_active = True
+        self.current_risk = "DANGER"
+        self.current_hazard_level = "red"
+        self.current_hazard_type = "fire"
+
     # ────────────────────────── Splash Screen ──────────────────────────
 
     def _show_splash(self):
@@ -525,17 +535,28 @@ class LumiLinkApp(ctk.CTk):
             motion
         )
 
-        # Store result globally
+        # Store result globally (manual SOS mode can override startup danger).
+        if self.manual_sos_mode:
+            if self.manual_sos_active:
+                risk = "DANGER"
+                hazard_type = "fire"
+            else:
+                risk = "CLEAR"
+                hazard_type = "none"
+        else:
+            hazard_type = self._infer_hazard_type(smoke, gas, shock)
+
         self.current_risk = risk
         self.current_hazard_level = self._risk_to_level(risk)
-        self.current_hazard_type = self._infer_hazard_type(smoke, gas, shock)
+        self.current_hazard_type = hazard_type
         self.current_sensor_source = sensor_data.get("source", "simulator")
 
         # Keep simulator hazard metadata in sync so existing screens remain coherent.
         self.sensor_sim.hazard_level = self.current_hazard_level
         self.sensor_sim.active_hazard = None if self.current_hazard_level != "red" else self.current_hazard_type
 
-        self._maybe_auto_start_guide(risk)
+        if self.auto_guide_enabled:
+            self._maybe_auto_start_guide(risk)
 
         # Refresh screen
         if self.current_screen_name and self.current_screen_name in self.screens:
