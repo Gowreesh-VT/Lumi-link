@@ -108,9 +108,6 @@ class SOSScreen(ctk.CTkFrame):
         self._reset_ui()
 
     def _cancel_and_back(self):
-        self.sos_sim.cancel_sos()
-        self._send_led_command("SOS_OFF")
-        self._reset_ui()
         self.app.show_screen("dashboard")
 
     def _reset_ui(self):
